@@ -1,10 +1,4 @@
 ;; -*- no-byte-compile: t; -*-
 ;;; lang/data/packages.el
 
-(package! graphql-mode)
-(package! json-mode)
-(package! toml-mode)
-(package! yaml-mode)
-(package! csv-mode)
-(package! dhall-mode)
-(package! protobuf-mode)
+(package! csv-mode :pin "8da54e8b4ef9e5fe8a0afa147c625ced603dc0aa")

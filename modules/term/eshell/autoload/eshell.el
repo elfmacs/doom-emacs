@@ -10,7 +10,7 @@
 
 
 ;;
-;; Helpers
+;;; Helpers
 
 (defun +eshell--add-buffer (buf)
   (ring-remove+insert+extend +eshell-buffers buf 'grow))
@@ -21,13 +21,15 @@
     t))
 
 (defun +eshell--bury-buffer (&optional dedicated-p)
-  (unless (switch-to-prev-buffer nil 'bury)
-    (switch-to-buffer (doom-fallback-buffer)))
-  (when (eq major-mode 'eshell-mode)
-    (switch-to-buffer (doom-fallback-buffer)))
-  (when +eshell-enable-new-shell-on-split
-    (when-let (win (get-buffer-window (+eshell/here)))
-      (set-window-dedicated-p win dedicated-p))))
+  (let ((directory default-directory))
+    (unless (switch-to-prev-buffer nil 'bury)
+      (switch-to-buffer (doom-fallback-buffer)))
+    (when (eq major-mode 'eshell-mode)
+      (switch-to-buffer (doom-fallback-buffer)))
+    (when +eshell-enable-new-shell-on-split
+      (let ((default-directory directory))
+        (when-let (win (get-buffer-window (+eshell/here)))
+          (set-window-dedicated-p win dedicated-p))))))
 
 (defun +eshell--setup-window (window &optional flag)
   (when (window-live-p window)
@@ -75,7 +77,7 @@
 
 
 ;;
-;; Commands
+;;; Commands
 
 ;;;###autoload
 (defun +eshell/toggle (arg &optional command)
@@ -106,7 +108,7 @@
             (evil-change-to-initial-state))
           (goto-char (point-max)))
       (with-current-buffer (pop-to-buffer eshell-buffer)
-        (doom|mark-buffer-as-real)
+        (doom-mark-buffer-as-real-h)
         (if (eq major-mode 'eshell-mode)
             (run-hooks 'eshell-mode-hook)
           (eshell-mode))
@@ -117,8 +119,6 @@
 (defun +eshell/here (&optional command)
   "Open eshell in the current buffer."
   (interactive "P")
-  (when (eq major-mode 'eshell-mode)
-    (user-error "Already in an eshell buffer"))
   (let ((buf (+eshell--unused-buffer)))
     (with-current-buffer (switch-to-buffer buf)
       (if (eq major-mode 'eshell-mode)
@@ -146,7 +146,7 @@ Once the eshell process is killed, the previous frame layout is restored."
 
 
 ;;
-;; Keybinds
+;;; Keybinds
 
 ;;;###autoload
 (defun +eshell/search-history ()
@@ -177,7 +177,13 @@ Once the eshell process is killed, the previous frame layout is restored."
 bottom. This ties pcomplete into ivy or helm, if they are enabled."
   (interactive)
   (require 'pcomplete)
-  (ignore-errors (pcomplete-std-complete)))
+  (if (and (bound-and-true-p company-mode)
+           (or company-candidates
+               (and (company-pcomplete-available)
+                    (company-pcomplete--prefix)
+                    (company-pcomplete--candidates))))
+      (call-interactively #'company-pcomplete)
+    (ignore-errors (pcomplete-std-complete))))
 
 ;;;###autoload
 (defun +eshell/quit-or-delete-char (arg)
@@ -266,10 +272,10 @@ delete."
 
 
 ;;
-;; Hooks
+;;; Hooks
 
 ;;;###autoload
-(defun +eshell|init ()
+(defun +eshell-init-h ()
   "Initialize and track this eshell buffer in `+eshell-buffers'."
   (let ((current-buffer (current-buffer)))
     (dolist (buf (+eshell-buffers))
@@ -280,7 +286,7 @@ delete."
     (setq +eshell--last-buffer current-buffer)))
 
 ;;;###autoload
-(defun +eshell|cleanup ()
+(defun +eshell-cleanup-h ()
   "Close window (or workspace) on quit."
   (let ((buf (current-buffer)))
     (when (+eshell--remove-buffer buf)
@@ -307,13 +313,13 @@ delete."
                             return (select-window win))))))))))
 
 ;;;###autoload
-(defun +eshell|switch-workspace (type)
+(defun +eshell-switch-workspace-fn (type)
   (when (eq type 'frame)
     (setq +eshell-buffers
           (or (persp-parameter 'eshell-buffers)
               (make-ring 25)))))
 
 ;;;###autoload
-(defun +eshell|save-workspace (_workspace target)
+(defun +eshell-save-workspace-fn (_workspace target)
   (when (framep target)
     (set-persp-parameter 'eshell-buffers +eshell-buffers)))

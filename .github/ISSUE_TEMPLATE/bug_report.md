@@ -1,43 +1,48 @@
 ---
 name: Bug report
-about: Something went wrong, please fix it!
-labels: is:bug
-title: "[BUG] "
-assignees: ''
+about: Doom might be misbehaving
 ---
+<!-- 
+  Please take the time to write a detailed bug report. Your issue will be 
+  automatically deleted if it is too vague or fails to adhere to this template 
+  without good reason.
+-->
 
-**Describe the issue**
-Start with a brief 1 or 2 sentence summary of issue.
-
-Then follow with a longer explanation, if necessary. Here are some suggestions
-on what to include:
-- What you expected vs what actually happened
-- Screenshots/casts of your issue
-- A link to your private config
-- Labels for any keys you reference (use `SPC h k` to inspect a key)
-- Any warnings or errors logged to \*Messages\* (`SPC h e` or `M-x
-  view-echo-area-messages`).
-
-<details><pre>
-If available, please a backtrace of the error here.
-
-To acquire a backtrace, enable `debug-on-error` then recreate the error. Here
-are ways to enable `debug-on-error`:
-- `M-x toggle-debug-on-error`,
-- Start Emacs with `emacs --debug-init`
-- If the error occurred while using `bin/doom`, use the `-d`/`--debug`
-- switches or the `DEBUG` environment variable.
-</pre></details>
+**What did you expect to happen?**
+...
 
 
-**Steps to reproduce**
+**What actually happened?**
+...
+
+
+**Additional details:**
+<!--
+- Link to your private config, if possible
+- Include screenshots/casts of your issue
+- Replace key sequences in your steps to reproduce, use commands
+- Include any warnings or errors logged to \*Messages\* (use `M-x
+  view-echo-area-messages` to see it).
+- If an error message is involved produce a backtrace of it, copy it to
+  pastebin.com, and post the link here.
+
+  How to acquire a backtrace:
+https://doomemacs.org/docs/getting_started.org#how-to-extract-a-backtrace-from-an-error
+-->
+
+
+**Steps to reproduce:**
 1. Select these example steps,
 2. Delete them,
-3. And replace them with precise steps to reproduce your issue.
-4. Fill in "system information" below.
+3. Replace them with precise steps to reproduce your issue.
+4. Include code samples, keybinds, and commands.
+5. Please don't skimp on details.
+6. Then fill in "system information" below or this issue will be deleted.
 
 
-**System information**
-<details><pre>
-Place the output of `M-x doom/info` or `~/.emacs.d/bin/doom info` here.
-</pre></details>
+**System information:**
+<!--
+  1. Grab output from `M-x doom/info` or `~/.emacs.d/bin/doom info`,
+  2. Paste it into pastebin.com,
+  3. Paste URL above this commented block.
+-->

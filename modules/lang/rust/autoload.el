@@ -14,3 +14,14 @@
     (when buf
       (pop-to-buffer buf)
       t)))
+
+
+;;
+;;; Custom Cargo commands
+
+(autoload 'rustic-run-cargo-command "rustic-cargo")
+;;;###autoload
+(defun +rust/cargo-audit ()
+  "Run 'cargo audit' for the current project."
+  (interactive)
+  (rustic-run-cargo-command "cargo audit"))

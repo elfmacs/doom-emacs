@@ -2,7 +2,7 @@
 
 ;;;###autoload
 (defvar +company-backend-alist
-  '((text-mode company-dabbrev company-yasnippet company-ispell)
+  '((text-mode (:separate company-dabbrev company-yasnippet company-ispell))
     (prog-mode company-capf company-yasnippet)
     (conf-mode company-capf company-dabbrev-code company-yasnippet))
   "An alist matching modes to company backends. The backends for any mode is
@@ -65,15 +65,14 @@ Examples:
 ;;; Hooks
 
 ;;;###autoload
-(defun +company|init-backends ()
+(defun +company-init-backends-h ()
   "Set `company-backends' for the current buffer."
-  (if (not company-mode)
-      (remove-hook 'change-major-mode-after-body-hook #'+company|init-backends 'local)
-    (unless (eq major-mode 'fundamental-mode)
-      (setq-local company-backends (+company--backends)))
-    (add-hook 'change-major-mode-after-body-hook #'+company|init-backends nil 'local)))
+  (or (memq major-mode '(fundamental-mode special-mode))
+      buffer-read-only
+      (doom-temp-buffer-p (or (buffer-base-buffer) (current-buffer)))
+      (setq-local company-backends (+company--backends))))
 
-(put '+company|init-backends 'permanent-local-hook t)
+(put '+company-init-backends-h 'permanent-local-hook t)
 
 
 ;;
@@ -82,8 +81,10 @@ Examples:
 ;;;###autoload
 (defun +company-has-completion-p ()
   "Return non-nil if a completion candidate exists at point."
-  (and (company-manual-begin)
-       (= company-candidates-length 1)))
+  (when company-mode
+    (unless company-candidates-length
+      (company-manual-begin))
+    (= company-candidates-length 1)))
 
 ;;;###autoload
 (defun +company/toggle-auto-completion ()
@@ -129,12 +130,13 @@ C-x C-l."
     (`candidates
      (all-completions
       arg
-      (split-string
-       (replace-regexp-in-string
-        "^[\t\s]+" ""
-        (concat (buffer-substring-no-properties (point-min) (line-beginning-position))
-                (buffer-substring-no-properties (line-end-position) (point-max))))
-       "\\(\r\n\\|[\n\r]\\)" t)))))
+      (delete-dups
+       (split-string
+        (replace-regexp-in-string
+         "^[\t\s]+" ""
+         (concat (buffer-substring-no-properties (point-min) (line-beginning-position))
+                 (buffer-substring-no-properties (line-end-position) (point-max))))
+        "\\(\r\n\\|[\n\r]\\)" t))))))
 
 ;;;###autoload
 (defun +company/dict-or-keywords ()

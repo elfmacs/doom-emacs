@@ -1,7 +1,14 @@
 ;;; ui/modeline/config.el -*- lexical-binding: t; -*-
 
-(def-package! doom-modeline
+(when (featurep! +light)
+  (load! "+light"))
+
+
+(use-package! doom-modeline
+  :unless (featurep! +light)
   :hook (after-init . doom-modeline-mode)
+  :hook (doom-modeline-mode . size-indication-mode) ; filesize in modeline
+  :hook (doom-modeline-mode . column-number-mode)   ; cursor column in modeline
   :init
   (unless after-init-time
     ;; prevent flash of unstyled modeline at startup
@@ -25,51 +32,42 @@
   (when (daemonp)
     (setq doom-modeline-icon t))
   :config
+  ;; HACK Fix #4102 due to empty all-the-icons return value (caused by
+  ;;      `doom--disable-all-the-icons-in-tty-a' advice) in tty daemon frames.
+  (defadvice! +modeline-disable-icon-in-daemon-a (orig-fn &rest args)
+    :around #'doom-modeline-propertize-icon
+    (when (display-graphic-p)
+      (apply orig-fn args)))
+
   ;; Fix an issue where these two variables aren't defined in TTY Emacs on MacOS
   (defvar mouse-wheel-down-event nil)
   (defvar mouse-wheel-up-event nil)
 
-  (add-hook 'doom-modeline-mode-hook #'size-indication-mode) ; filesize in modeline
-  (add-hook 'doom-modeline-mode-hook #'column-number-mode)   ; cursor column in modeline
-
-  (add-hook 'doom-change-font-size-hook #'+modeline|resize-for-font)
+  (add-hook 'after-setting-font-hook #'+modeline-resize-for-font-h)
   (add-hook 'doom-load-theme-hook #'doom-modeline-refresh-bars)
 
   (add-hook '+doom-dashboard-mode-hook #'doom-modeline-set-project-modeline)
 
-  (defun +modeline|hide-in-non-status-buffer ()
-    "Show minimal modeline in magit-status buffer, no modeline elsewhere."
-    (if (eq major-mode 'magit-status-mode)
-        (doom-modeline-set-project-modeline)
-      (hide-mode-line-mode)))
-  (add-hook 'magit-mode-hook #'+modeline|hide-in-non-status-buffer)
-
-  ;; Remove unused segments & extra padding
-  (doom-modeline-def-modeline 'main
-    '(bar window-number matches buffer-info remote-host buffer-position selection-info)
-    '(objed-state misc-info persp-name irc mu4e github debug input-method buffer-encoding lsp major-mode process vcs checker))
-
-  (doom-modeline-def-modeline 'special
-    '(bar window-number matches buffer-info-simple buffer-position selection-info)
-    '(objed-state misc-info persp-name debug input-method irc-buffers buffer-encoding lsp major-mode process checker))
-
-  (doom-modeline-def-modeline 'project
-    '(bar window-number buffer-default-directory)
-    '(misc-info mu4e github debug fancy-battery " " major-mode process))
+  (add-hook! 'magit-mode-hook
+    (defun +modeline-hide-in-non-status-buffer-h ()
+      "Show minimal modeline in magit-status buffer, no modeline elsewhere."
+      (if (eq major-mode 'magit-status-mode)
+          (doom-modeline-set-vcs-modeline)
+        (hide-mode-line-mode))))
 
   ;; Some functions modify the buffer, causing the modeline to show a false
-  ;; modified state, so we try to force them to behave.
-  (defun +modeline*inhibit-modification-hooks (orig-fn &rest args)
+  ;; modified state, so force them to behave.
+  (defadvice! +modeline--inhibit-modification-hooks-a (orig-fn &rest args)
+    :around #'ws-butler-after-save
     (with-silent-modifications (apply orig-fn args)))
-  (advice-add #'ws-butler-after-save :around #'+modeline*inhibit-modification-hooks))
 
 
-;;
-;; Extensions
+  ;;
+  ;;; Extensions
+  (use-package! anzu
+    :after-call isearch-mode)
 
-(def-package! anzu
-  :after-call isearch-mode)
-
-(def-package! evil-anzu
-  :when (featurep! :editor evil)
-  :after-call (evil-ex-start-search evil-ex-start-word-search evil-ex-search-activate-highlight))
+  (use-package! evil-anzu
+    :when (featurep! :editor evil)
+    :after-call evil-ex-start-search evil-ex-start-word-search evil-ex-search-activate-highlight
+    :config (global-anzu-mode +1)))

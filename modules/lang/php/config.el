@@ -1,22 +1,54 @@
 ;;; lang/php/config.el -*- lexical-binding: t; -*-
 
-(def-package! php-mode
+(defvar +php--company-backends nil
+  "List of company backends to use in `php-mode'.")
+
+(after! projectile
+  (add-to-list 'projectile-project-root-files "composer.json"))
+
+
+;;
+;;; Packages
+
+(use-package! php-mode
   :mode "\\.inc\\'"
   :config
   ;; Disable HTML compatibility in php-mode. `web-mode' has superior support for
-  ;; php+html. Use the .phtml
+  ;; php+html. Use the .phtml extension instead.
   (setq php-template-compatibility nil)
 
   (set-docsets! 'php-mode "PHP" "PHPUnit" "Laravel" "CakePHP" "CodeIgniter" "Doctrine_ORM")
   (set-repl-handler! 'php-mode #'php-boris)
   (set-lookup-handlers! 'php-mode :documentation #'php-search-documentation)
   (set-formatter! 'php-mode #'php-cs-fixer-fix)
+  (set-ligatures! 'php-mode
+    ;; Functional
+    :lambda "function()"
+    :def "function"
+    ;; Types
+    :null "null"
+    :true "true" :false "false"
+    :int "int" :float "float"
+    :str "string"
+    :bool "list"
+    ;; Flow
+    :not "!"
+    :and "&&" :and "and"
+    :or "||" :or "or"
+    :for "for"
+    :return "return"
+    :yield "use")
 
-  (if (featurep! +lsp)
-      (add-hook 'php-mode-local-vars-hook #'lsp!)
-    ;; `+php-company-backend' uses `company-phpactor', `php-extras-company' or
-    ;; `company-dabbrev-code', in that order.
-    (set-company-backend! 'php-mode '+php-company-backend 'company-dabbrev-code))
+  (if (not (featurep! +lsp))
+      ;; `+php-company-backend' uses `company-phpactor', `php-extras-company' or
+      ;; `company-dabbrev-code', in that order.
+      (when +php--company-backends
+        (set-company-backend! 'php-mode
+          (cons :separate +php--company-backends)
+          'company-dabbrev-code))
+    (when (executable-find "php-language-server.php")
+      (setq lsp-clients-php-server-command "php-language-server.php"))
+    (add-hook 'php-mode-local-vars-hook #'lsp!))
 
   ;; Use the smallest `sp-max-pair-length' for optimum `smartparens' performance
   (setq-hook! 'php-mode-hook sp-max-pair-length 5)
@@ -27,22 +59,23 @@
 
   (map! :localleader
         :map php-mode-map
-        :prefix "t"
+        :prefix ("t" . "test")
         "r" #'phpunit-current-project
         "a" #'phpunit-current-class
         "s" #'phpunit-current-test))
 
 
-(def-package! phpactor
+(use-package! phpactor
   :unless (featurep! +lsp)
   :after php-mode
+  :init
+  (add-to-list '+php--company-backends #'company-phpactor nil 'eq)
   :config
   (set-lookup-handlers! 'php-mode
     :definition #'phpactor-goto-definition)
-
   (map! :localleader
         :map php-mode-map
-        :prefix "r"
+        :prefix ("r" . "refactor")
         "cc" #'phpactor-copy-class
         "mc" #'phpactor-move-class
         "oi" #'phpactor-offset-info
@@ -50,7 +83,7 @@
         "ic" #'phpactor-import-class))
 
 
-(def-package! php-refactor-mode
+(use-package! php-refactor-mode
   :hook php-mode
   :config
   (map! :localleader
@@ -62,11 +95,13 @@
         "rv" #'php-refactor--rename-local-variable))
 
 
-(def-package! php-extras
+(use-package! php-extras
   :after php-mode
   :preface
   ;; We'll set up company support ourselves
   (advice-add #'php-extras-company-setup :override #'ignore)
+  :init
+  (add-to-list '+php--company-backends #'php-extras-company)
   :config
   (setq php-extras-eldoc-functions-file
         (concat doom-etc-dir "php-extras-eldoc-functions"))
@@ -87,7 +122,7 @@
                    (message "PHP eldoc updated!")))))
 
 
-(def-package! hack-mode
+(use-package! hack-mode
   :when (featurep! +hack)
   :mode "\\.hh$")
 
@@ -96,10 +131,9 @@
 ;; Projects
 
 (def-project-mode! +php-laravel-mode
-  :modes (php-mode yaml-mode web-mode nxml-mode js2-mode scss-mode)
+  :modes '(php-mode yaml-mode web-mode nxml-mode js2-mode scss-mode)
   :files (and "artisan" "server.php"))
 
 (def-project-mode! +php-composer-mode
-  :modes (web-mode php-mode)
+  :modes '(web-mode php-mode)
   :files ("composer.json"))
-

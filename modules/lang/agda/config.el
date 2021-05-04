@@ -1,16 +1,15 @@
 ;;; lang/agda/config.el -*- lexical-binding: t; -*-
 
-(defvar +agda-dir
-  (when (executable-find "agda-mode")
-    (file-name-directory (shell-command-to-string "agda-mode locate"))))
+(when (and (featurep! +local)
+           (executable-find "agda-mode"))
+  (add-load-path!
+   (file-name-directory (shell-command-to-string "agda-mode locate")))
+  (unless (require 'agda2 nil t)
+    (message "Failed to find the `agda2' package")))
 
-(def-package! agda2
-  :when +agda-dir
-  :load-path +agda-dir)
-
-(def-package! agda2-mode
-  :defer t
-  :config
+(after! agda2-mode
+  (set-lookup-handlers! 'agda2-mode
+    :definition #'agda2-goto-definition-keyboard)
   (map! :map agda2-mode-map
         :localleader
         "?"   #'agda2-show-goals
@@ -18,7 +17,7 @@
         ","   #'agda2-goal-and-context
         "="   #'agda2-show-constraints
         "SPC" #'agda2-give
-        "a"   #'agda2-auto
+        "a"   #'agda2-auto-maybe-all
         "b"   #'agda2-previous-goal
         "c"   #'agda2-make-case
         "d"   #'agda2-infer-type-maybe-toplevel

@@ -1,6 +1,6 @@
 ;;; ui/window-select/config.el -*- lexical-binding: t; -*-
 
-(def-package! switch-window
+(use-package! switch-window
   :when (featurep! +switch-window)
   :defer t
   :init
@@ -10,20 +10,21 @@
         switch-window-qwerty-shortcuts '("a" "s" "d" "f" "g" "h" "j" "k" "l")))
 
 
-(def-package! ace-window
+(use-package! ace-window
   :unless (featurep! +switch-window)
   :defer t
   :init
   (global-set-key [remap other-window] #'ace-window)
   :config
-  (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
-        aw-scope 'frame
+  (unless (featurep! +numbers)
+    (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)))
+  (setq aw-scope 'frame
         aw-background t))
 
 
-(def-package! winum
+(use-package! winum
   :when (featurep! +numbers)
-  :after-call (doom-switch-window-hook)
+  :after-call doom-switch-window-hook
   :config
   (winum-mode +1)
   (map! :map evil-window-map

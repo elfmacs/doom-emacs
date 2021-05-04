@@ -1,5 +1,11 @@
 ;;; core/autoload/sessions.el -*- lexical-binding: t; -*-
 
+(defvar desktop-base-file-name)
+(defvar desktop-dirname)
+(defvar desktop-restore-eager)
+(defvar desktop-file-modtime)
+
+
 ;;
 ;;; Helpers
 
@@ -41,10 +47,16 @@
   "TODO"
   (setq file (expand-file-name (or file (doom-session-file))))
   (message "Attempting to load %s" file)
-  (cond ((require 'persp-mode nil t)
+  (cond ((not (file-readable-p file))
+         (message "No session file at %S to read from" file))
+        ((require 'persp-mode nil t)
          (unless persp-mode
            (persp-mode +1))
-         (persp-load-state-from-file file))
+         (let ((allowed (persp-list-persp-names-in-file file)))
+           (cl-loop for name being the hash-keys of *persp-hash*
+                    unless (member name allowed)
+                    do (persp-kill name))
+           (persp-load-state-from-file file)))
         ((and (require 'frameset nil t)
               (require 'restart-emacs nil t))
          (restart-emacs--restore-frames-using-desktop file))
@@ -89,13 +101,14 @@
    (let ((session-file (doom-session-file)))
      (list (or (read-file-name "Session to restore: "
                                (file-name-directory session-file)
-                               nil t
-                               (file-name-nondirectory session-file))
+                               (file-name-nondirectory session-file)
+                               t)
                (user-error "No session selected. Aborting")))))
   (unless file
     (error "No session file selected"))
   (message "Loading '%s' session" file)
-  (doom-load-session file))
+  (doom-load-session file)
+  (message "Session restored. Welcome back."))
 
 ;;;###autoload
 (defun doom/save-session (file)
@@ -104,7 +117,6 @@
    (let ((session-file (doom-session-file)))
      (list (or (read-file-name "Save session to: "
                                (file-name-directory session-file)
-                               nil nil
                                (file-name-nondirectory session-file))
                (user-error "No session selected. Aborting")))))
   (unless file
@@ -121,5 +133,11 @@
   (interactive "P")
   (setq doom-autosave-session nil)
   (doom/quicksave-session)
-  (restart-emacs
-   (delq nil (list (if debug "--debug-init") "--restore"))))
+  (save-some-buffers nil t)
+  (letf! ((#'save-buffers-kill-emacs #'kill-emacs)
+          (confirm-kill-emacs))
+    (restart-emacs
+     (append (if debug (list "--debug-init"))
+             (when (boundp 'chemacs-current-emacs-profile)
+               (list "--with-profile" chemacs-current-emacs-profile))
+             (list "--restore")))))

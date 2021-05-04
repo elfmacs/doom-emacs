@@ -1,47 +1,75 @@
 ;;; lang/csharp/config.el -*- lexical-binding: t; -*-
 
-(after! csharp-mode
-  (add-hook 'csharp-mode-hook #'rainbow-delimiters-mode)
-
+(use-package! csharp-mode
+  :hook (csharp-mode . rainbow-delimiters-mode)
+  :config
   (set-electric! 'csharp-mode :chars '(?\n ?\}))
   (set-rotate-patterns! 'csharp-mode
     :symbols '(("public" "protected" "private")
                ("class" "struct")))
+  (set-ligatures! 'csharp-mode
+    ;; Functional
+    :lambda        "() =>"
+    ;; Types
+    :null          "null"
+    :true          "true"
+    :false         "false"
+    :int           "int"
+    :float         "float"
+    :str           "string"
+    :bool          "bool"
+    :list          "List"
+    ;; Flow
+    :not           "!"
+    :in            "in"
+    :and           "&&"
+    :or            "||"
+    :for           "for"
+    :return        "return"
+    :yield         "yield")
+
   (sp-local-pair 'csharp-mode "<" ">"
                  :when '(+csharp-sp-point-in-type-p)
-                 :post-handlers '(("| " "SPC"))))
+                 :post-handlers '(("| " "SPC")))
 
+  (when (featurep! +lsp)
+    (add-hook 'csharp-mode-local-vars-hook #'lsp!))
 
-(def-package! omnisharp
-  :hook (csharp-mode . omnisharp-mode)
+  (defadvice! +csharp-disable-clear-string-fences-a (orig-fn &rest args)
+    "This turns off `c-clear-string-fences' for `csharp-mode'. When
+on for `csharp-mode' font lock breaks after an interpolated string
+or terminating simple string."
+    :around #'csharp-disable-clear-string-fences
+    (unless (eq major-mode 'csharp-mode)
+      (apply orig-fn args))))
+
+(use-package! omnisharp
+  :unless (featurep! +lsp)
   :commands omnisharp-install-server
+  :hook (csharp-mode-local-vars . omnisharp-mode)
   :preface
   (setq omnisharp-auto-complete-want-documentation nil
-        omnisharp-cache-directory (concat doom-cache-dir "omnisharp"))
+        omnisharp-cache-directory (concat doom-etc-dir "omnisharp"))
   :config
-  (defun +csharp|cleanup-omnisharp-server ()
-    "Clean up the omnisharp server once you kill the last csharp-mode buffer."
-    (unless (doom-buffers-in-mode 'csharp-mode (buffer-list))
-      (omnisharp-stop-server)))
-  (add-hook! csharp-mode
-    (add-hook 'kill-buffer-hook #'+csharp|cleanup-omnisharp-server nil t))
-
-  (set-company-backend! 'csharp-mode 'company-omnisharp)
-  (set-lookup-handlers! 'csharp-mode
+  (set-company-backend! 'omnisharp-mode 'company-omnisharp)
+  (set-lookup-handlers! 'omnisharp-mode
     :definition #'omnisharp-go-to-definition
     :references #'omnisharp-find-usages
     :documentation #'omnisharp-current-type-documentation)
+
+  ;; Kill the omnisharp server once the last csharp-mode buffer is killed
+  (add-hook! 'omnisharp-mode-hook
+    (add-hook 'kill-buffer-hook #'+csharp-kill-omnisharp-server-h nil t))
 
   (map! :localleader
         :map omnisharp-mode-map
         "b" #'omnisharp-recompile
         (:prefix "r"
-          "i"  #'omnisharp-fix-code-issue-at-point
           "u"  #'omnisharp-fix-usings
           "r"  #'omnisharp-rename
           "a"  #'omnisharp-show-last-auto-complete-result
           "o"  #'omnisharp-show-overloads-at-point)
-        (:prefix "f"
+        (:prefix "g"
           "u"  #'omnisharp-find-usages
           "i"  #'omnisharp-find-implementations
           "f"  #'omnisharp-navigate-to-current-file-member
@@ -52,15 +80,24 @@
           "ti" #'omnisharp-current-type-information
           "td" #'omnisharp-current-type-documentation)
         (:prefix "t"
-          "r" (λ! (omnisharp-unit-test "fixture"))
-          "s" (λ! (omnisharp-unit-test "single"))
-          "a" (λ! (omnisharp-unit-test "all")))))
+          "s" #'omnisharp-unit-test-at-point
+          "l" #'omnisharp-unit-test-last
+          "b" #'omnisharp-unit-test-buffer)))
 
 
-(when (featurep! +unity)
-  ;; `shader-mode' --- unity shaders
-  (add-to-list 'auto-mode-alist '("\\.shader$" . shader-mode))
-
+;; Unity shaders
+(use-package! shader-mode
+  :when (featurep! +unity)
+  :mode "\\.shader\\'"
+  :config
   (def-project-mode! +csharp-unity-mode
-    :modes (csharp-mode shader-mode)
+    :modes '(csharp-mode shader-mode)
     :files (and "Assets" "Library/MonoManager.asset" "Library/ScriptMapper")))
+
+
+(use-package! sharper
+  :when (featurep! +dotnet)
+  :general ("C-c d" #'sharper-main-transient))
+
+
+(use-package! sln-mode :mode "\\.sln\\'")

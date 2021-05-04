@@ -1,8 +1,21 @@
 ;;; app/rss/autoload.el -*- lexical-binding: t; -*-
 
+(defvar +rss--wconf nil)
+
 ;;;###autoload
-(defalias '=rss #'elfeed
-  "Activate (or switch to) `elfeed' in its workspace.")
+(defun =rss ()
+  "Activate (or switch to) `elfeed' in its workspace."
+  (interactive)
+  (if (featurep! :ui workspaces)
+      (progn
+        (+workspace-switch "rss" t)
+        (doom/switch-to-scratch-buffer)
+        (elfeed)
+        (+workspace/display))
+    (setq +rss--wconf (current-window-configuration))
+    (delete-other-windows)
+    (switch-to-buffer (doom-fallback-buffer))
+    (elfeed)))
 
 ;;;###autoload
 (defun +rss/delete-pane ()
@@ -46,7 +59,7 @@
 ;; Hooks
 
 ;;;###autoload
-(defun +rss|elfeed-wrap ()
+(defun +rss-elfeed-wrap-h ()
   "Enhances an elfeed entry's readability by wrapping it to a width of
 `fill-column'."
   (let ((inhibit-read-only t)
@@ -57,7 +70,7 @@
     (set-buffer-modified-p nil)))
 
 ;;;###autoload
-(defun +rss|cleanup ()
+(defun +rss-cleanup-h ()
   "Clean up after an elfeed session. Kills all elfeed and elfeed-org files."
   (interactive)
   ;; `delete-file-projectile-remove-from-cache' slows down `elfeed-db-compact'
@@ -70,14 +83,19 @@
   (let ((search-buffers (doom-buffers-in-mode 'elfeed-search-mode))
         (show-buffers (doom-buffers-in-mode 'elfeed-show-mode))
         kill-buffer-query-functions)
-    (dolist (file +rss-elfeed-files)
+    (dolist (file (bound-and-true-p rmh-elfeed-org-files))
       (when-let (buf (get-file-buffer (expand-file-name file org-directory)))
         (kill-buffer buf)))
     (dolist (b search-buffers)
       (with-current-buffer b
-        (remove-hook 'kill-buffer-hook #'+rss|cleanup :local)
+        (remove-hook 'kill-buffer-hook #'+rss-cleanup-h :local)
         (kill-buffer b)))
-    (mapc #'kill-buffer show-buffers)))
+    (mapc #'kill-buffer show-buffers))
+  (if (featurep! :ui workspaces)
+      (+workspace/delete "rss")
+    (when (window-configuration-p +rss--wconf)
+      (set-window-configuration +rss--wconf))
+    (setq +rss--wconf nil)))
 
 
 ;;
@@ -99,16 +117,15 @@
              collect url)))
 
 ;;;###autoload
-(defun +rss-put-sliced-image (spec alt &optional flags)
+(defun +rss-put-sliced-image-fn (spec alt &optional flags)
   "TODO"
-  (cl-letf (((symbol-function #'insert-image)
-             (lambda (image &optional alt _area _slice)
-               (let ((height (cdr (image-size image t))))
-                 (insert-sliced-image image alt nil (max 1 (/ height 20.0)) 1)))))
+  (letf! (defun insert-image (image &optional alt _area _slice)
+           (let ((height (cdr (image-size image t))))
+             (insert-sliced-image image alt nil (max 1 (/ height 20.0)) 1)))
     (shr-put-image spec alt flags)))
 
 ;;;###autoload
-(defun +rss-render-image-tag-without-underline (dom &optional url)
+(defun +rss-render-image-tag-without-underline-fn (dom &optional url)
   "TODO"
   (let ((start (point)))
     (shr-tag-img dom url)

@@ -1,16 +1,19 @@
 ;;; lang/kotlin/config.el -*- lexical-binding: t; -*-
 
 (after! kotlin-mode
+  (when (featurep! +lsp)
+    (add-hook 'kotlin-mode-local-vars-hook #'lsp!))
   (set-docsets! 'kotlin-mode "Kotlin")
+  (set-repl-handler! 'kotlin-mode #'kotlin-repl)
 
   (map! :map kotlin-mode-map
         :localleader
         :prefix ("b" . "build")
-        :desc "gradlew assemble" "a" (λ! (+kotlin/run-gradlew "assemble"))
-        :desc "gradlew build"    "b" (λ! (+kotlin/run-gradlew "build"))
-        :desc "gradlew test"     "t" (λ! (+kotlin/run-gradlew "test"))))
+        :desc "gradlew assemble" "a" (cmd! (+kotlin/run-gradlew "assemble"))
+        :desc "gradlew build"    "b" (cmd! (+kotlin/run-gradlew "build"))
+        :desc "gradlew test"     "t" (cmd! (+kotlin/run-gradlew "test"))))
 
-(def-package! flycheck-kotlin
-  :when (featurep! :tools flycheck)
-  :after kotlin-mode
-  :config (add-hook 'kotlin-mode-hook #'flycheck-kotlin-setup))
+
+(use-package! flycheck-kotlin
+  :when (featurep! :checkers syntax)
+  :hook (kotlin-mode . flycheck-kotlin-setup))

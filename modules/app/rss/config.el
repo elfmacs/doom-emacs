@@ -4,10 +4,6 @@
 ;; by apps Reeder and Readkit. It can be invoked via `=rss'. Otherwise, if you
 ;; don't care for the UI you can invoke elfeed directly with `elfeed'.
 
-(defvar +rss-elfeed-files (list "elfeed.org")
-  "Where to look for elfeed.org files, relative to `org-directory'. Can be
-absolute paths.")
-
 (defvar +rss-split-direction 'below
   "What direction to pop up the entry buffer in elfeed.")
 
@@ -19,12 +15,13 @@ easier to scroll through.")
 ;;
 ;; Packages
 
-(def-package! elfeed
+(use-package! elfeed
   :commands elfeed
+  :init
+  (setq elfeed-db-directory (concat doom-local-dir "elfeed/db/")
+        elfeed-enclosure-default-dir (concat doom-local-dir "elfeed/enclosures/"))
   :config
   (setq elfeed-search-filter "@2-week-ago "
-        elfeed-db-directory (concat doom-local-dir "elfeed/db/")
-        elfeed-enclosure-default-dir (concat doom-local-dir "elfeed/enclosures/")
         elfeed-show-entry-switch #'pop-to-buffer
         elfeed-show-entry-delete #'+rss/delete-pane
         shr-max-image-proportion 0.8)
@@ -36,21 +33,21 @@ easier to scroll through.")
   (make-directory elfeed-db-directory t)
 
   ;; Ensure elfeed buffers are treated as real
-  (defun +rss-buffer-p (buf)
-    (string-match-p "^\\*elfeed" (buffer-name buf)))
-  (add-to-list 'doom-real-buffer-functions #'+rss-buffer-p nil #'eq)
+  (add-hook! 'doom-real-buffer-functions
+    (defun +rss-buffer-p (buf)
+      (string-match-p "^\\*elfeed" (buffer-name buf))))
 
   ;; Enhance readability of a post
-  (add-hook 'elfeed-show-mode-hook #'+rss|elfeed-wrap)
+  (add-hook 'elfeed-show-mode-hook #'+rss-elfeed-wrap-h)
   (add-hook! 'elfeed-search-mode-hook
-    (add-hook 'kill-buffer-hook #'+rss|cleanup nil t))
+    (add-hook 'kill-buffer-hook #'+rss-cleanup-h nil 'local))
 
   ;; Large images are annoying to scroll through, because scrolling follows the
   ;; cursor, so we force shr to insert images in slices.
   (when +rss-enable-sliced-images
     (setq-hook! 'elfeed-show-mode-hook
-      shr-put-image-function #'+rss-put-sliced-image
-      shr-external-rendering-functions '((img . +rss-render-image-tag-without-underline))))
+      shr-put-image-function #'+rss-put-sliced-image-fn
+      shr-external-rendering-functions '((img . +rss-render-image-tag-without-underline-fn))))
 
   ;; Keybindings
   (after! elfeed-show
@@ -64,11 +61,18 @@ easier to scroll through.")
       (kbd "M-RET") #'elfeed-search-browse-url)))
 
 
-(def-package! elfeed-org
+(use-package! elfeed-org
   :when (featurep! +org)
   :after elfeed
+  :preface
+  (setq rmh-elfeed-org-files (list "elfeed.org"))
   :config
-  (setq rmh-elfeed-org-files
-        (let ((default-directory org-directory))
-          (mapcar #'expand-file-name +rss-elfeed-files)))
-  (elfeed-org))
+  (elfeed-org)
+  (defadvice! +rss-skip-missing-org-files-a (&rest _)
+    :before '(elfeed rmh-elfeed-org-mark-feed-ignore elfeed-org-export-opml)
+    (unless (file-name-absolute-p (car rmh-elfeed-org-files))
+      (let* ((default-directory org-directory)
+             (files (mapcar #'expand-file-name rmh-elfeed-org-files)))
+        (dolist (file (cl-remove-if #'file-exists-p files))
+          (message "elfeed-org: ignoring %S because it can't be read" file))
+        (setq rmh-elfeed-org-files (cl-remove-if-not #'file-exists-p files))))))

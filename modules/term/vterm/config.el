@@ -1,16 +1,22 @@
 ;;; term/vterm/config.el -*- lexical-binding: t; -*-
 
-(def-package! vterm
-  :when (fboundp 'module-load)
-  :defer t
-  :preface (setq vterm-install t)
+(use-package! vterm
+  :when (bound-and-true-p module-file-suffix)
+  :commands vterm-mode
+  :hook (vterm-mode . doom-mark-buffer-as-real-h)
+  :hook (vterm-mode . hide-mode-line-mode) ; modeline serves no purpose in vterm
   :config
-  (set-popup-rule! "^vterm" :size 0.25 :vslot -4 :select t :quit nil :ttl 0)
+  (set-popup-rule! "^\\*vterm" :size 0.25 :vslot -4 :select t :quit nil :ttl 0)
 
-  (add-hook 'vterm-mode-hook #'doom|mark-buffer-as-real)
-  ;; Automatically kill buffer when vterm exits.
-  (add-to-list 'vterm-exit-functions (lambda (buffer) (if buffer (kill-buffer buffer))))
-  ;; Modeline serves no purpose in vterm
-  (add-hook 'vterm-mode-hook #'hide-mode-line-mode)
-  ;; Don't prompt about processes when killing vterm
-  (setq-hook! 'vterm-mode-hook confirm-kill-processes nil))
+  ;; Once vterm is dead, the vterm buffer is useless. Why keep it around? We can
+  ;; spawn another if want one.
+  (setq vterm-kill-buffer-on-exit t)
+
+  ;; 5000 lines of scrollback, instead of 1000
+  (setq vterm-max-scrollback 5000)
+
+  (setq-hook! 'vterm-mode-hook
+    ;; Don't prompt about dying processes when killing vterm
+    confirm-kill-processes nil
+    ;; Prevent premature horizontal scrolling
+    hscroll-margin 0))

@@ -9,17 +9,18 @@
   - [[#module-flags][Module Flags]]
   - [[#plugins][Plugins]]
 - [[#prerequisites][Prerequisites]]
-  - [[#stack][Stack]]
   - [[#cabal][Cabal]]
-  - [[#lsp][LSP]]
+  - [[#lsp-haskell-language-server][LSP (haskell-language-server)]]
+  - [[#lsp-ghcide][LSP (ghcide)]]
+  - [[#stack][Stack]]
   - [[#haskell-packages][Haskell packages]]
 - [[#configuration][Configuration]]
   - [[#using-the-new-style-cabal-repl][Using the new-style cabal REPL]]
 - [[#troubleshooting][Troubleshooting]]
 
 * Description
-This module adds [[https://www.haskell.org/][Haskell]] support, powered by either [[https://haskell-lang.org/intero][intero]] (the default), [[https://github.com/jyp/dante][dante]]
-or [[https://github.com/emacs-lsp/lsp-haskell][LSP]].
+This module adds [[https://www.haskell.org/][Haskell]] support, powered by either [[https://github.com/jyp/dante][dante]] (the default) or LSP
+(haskell-language-server or ghcide).
 
 + Code completion (~company-ghc~)
 + Look up documentation (~hoogle~)
@@ -30,7 +31,7 @@ or [[https://github.com/emacs-lsp/lsp-haskell][LSP]].
 + [[https://github.com/hlissner/doom-snippets/tree/master/haskell-mode][Snippets]]
 
 ** External resources
-Here are a few resources I've found indespensible in my Haskell adventures:
+Here are a few resources I've found indispensable in my Haskell adventures:
 
 + [[http://learnyouahaskell.com/][Learn you a haskell for great good]]
 + [[http://haskellbook.com/][Haskell Programming from first principles]]
@@ -38,48 +39,28 @@ Here are a few resources I've found indespensible in my Haskell adventures:
 + [[https://docs.haskellstack.org/en/stable/README/][The Haskell Tool Stack docs]]
  
 ** Module Flags
-+ =+intero= Enables intero; a comprehensive, stack-based development environment
-  for Haskell.
 + =+dante= Enables dante; a fork of intero aimed at lightweightedness. It
   doesn't depend on =stack=, supports both ~cabal~-only and ~stack~ projects,
   but lacks eldoc support.
-+ =+lsp= Enables lsp-haskell (this requires the ~:tools lsp~ to be enabled).
++ =+ghcide= Enables LSP support with ghcide (requires the ~:tools lsp~ module).
++ =+lsp= Enables LSP support with haskell-language-server (requires the ~:tools lsp~
+  module).
 
 ** Plugins
 + [[https://github.com/haskell/haskell-mode][haskell-mode]]
 + =+dante=
   + [[https://github.com/jyp/dante][dante]]
   + [[https://github.com/jyp/attrap][attrap]]
-+ =+intero=
-  + [[https://github.com/chrisdone/intero][intero]]
 + =+lsp=
   + [[https://github.com/emacs-lsp/lsp-haskell][lsp-haskell]]
 
 * Prerequisites
-Depending on whether you use Intero, Dante or LSP, your dependencies will
-differ:
+Depending on whether you use Dante, haskell-language-server or ghcide, your
+dependencies will differ:
 
-+ Intero and LSP users need =stack=
 + Dante users need =cabal=, =ghc= and =ghc-mod=
-+ LSP users need the =haskell-ide-engine= LSP server
++ LSP users need the =haskell-language-server= LSP server OR =ghcide=
 + All users will need the =hoogle= package
-
-** Stack
-To use Intero, you need =stack=:
-
-*** MacOS
-#+BEGIN_SRC sh
-brew install haskell-stack
-stack setup
-#+END_SRC
-
-*** Arch Linux
-#+BEGIN_SRC sh
-sudo pacman -S stack
-# Replace pacaur with your AUR package manager of choice
-pacaur -S ncurses5-compat-lib
-stack setup
-#+END_SRC
 
 ** Cabal
 To use Dante, you need =cabal= (the haskell package builder) and =ghci= (the
@@ -95,26 +76,43 @@ brew install cabal-install ghc
 sudo pacman -S cabal-install ghc
 #+END_SRC
 
-** LSP
-You will need =stack= and =git= installed.
-
-You will find a comprehensive [[https://github.com/haskell/haskell-ide-engine#installation][install guide for haskell-ide-engine on its
-project page]], but here's a TL;DR:
-
-*** MacOS
-haskell-ide-engine must be build and installed manually on MacOS, e.g.
-
-#+BEGIN_SRC emacs-lisp
-git clone https://github.com/haskell/haskell-ide-engine
-cd haskell-ide-engine
-make
+*** openSUSE
+#+BEGIN_SRC sh :dir /sudo::
+sudo zypper install cabal-install ghc
 #+END_SRC
 
-*** Arch Linux
-=haskell-ide-engine-git= is available on the AUR
+** LSP (haskell-language-server)
+You will need =stack= and =git= installed.
 
-#+BEGIN_SRC emacs-lisp
-yay -S haskell-ide-engine-git
+You will find a comprehensive [[https://github.com/haskell/haskell-language-server#installation][instructions for haskell-language-server on its project page]], but if you are using [[https://www.haskell.org/ghcup/][ghcup]]:
+
+#+BEGIN_SRC bash
+ghcup install hls
+#+END_SRC
+
+** LSP (ghcide)
+See https://github.com/digital-asset/ghcide for install instructions.
+
+** Stack
+To use LSP, you need =stack=:
+
+*** MacOS
+#+BEGIN_SRC sh
+brew install haskell-stack
+stack setup
+#+END_SRC
+*** Arch Linux
+#+BEGIN_SRC sh
+sudo pacman -S stack
+# Replace pacaur with your AUR package manager of choice
+pacaur -S ncurses5-compat-lib
+stack setup
+#+END_SRC
+
+*** openSUSE
+#+BEGIN_SRC sh :dir /sudo::
+sudo zypper install stack
+stack setup
 #+END_SRC
 
 ** Haskell packages

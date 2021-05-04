@@ -1,21 +1,47 @@
 ;;; core/cli/byte-compile.el -*- lexical-binding: t; -*-
 
-(dispatcher! (compile c) (doom-byte-compile args)
+(defcli! (compile c)
+    ((recompile-p ["-r" "--recompile"])
+     (core-p      ["-c" "--core"])
+     (private-p   ["-p" "--private"])
+     (verbose-p   ["-v" "--verbose"]))
   "Byte-compiles your config or selected modules.
 
   compile [TARGETS...]
   compile :core :private lang/python
   compile feature lang
 
-Accepts :core, :private and :plugins as special arguments, indicating you want
-to byte-compile Doom's core files, your private config or your ELPA plugins,
-respectively.")
+Accepts :core and :private as special arguments, which target Doom's core files
+and your private config files, respectively. To recompile your packages, use
+'doom build' instead."
+  (doom-cli-byte-compile
+   (if (or core-p private-p)
+       (append (when core-p
+                 (list (doom-glob doom-emacs-dir "init.el")
+                       doom-core-dir))
+               (when private-p
+                 (list doom-private-dir)))
+     (or (y-or-n-p
+          (concat "WARNING: Changes made to your config after compiling it won't take effect until\n"
+                  "this command is rerun or you run 'doom clean'! It will also make error backtraces\n"
+                  "much more difficult to decipher.\n\n"
+                  "If you intend to use it anyway, remember this or it will come back to bite you!\n\n"
+                  "Continue anyway?"))
+         (user-error "Aborted"))
+     (append (list (doom-glob doom-emacs-dir "init.el")
+                   doom-core-dir)
+             (cl-remove-if-not
+              ;; Only compile Doom's modules
+              (lambda (path) (file-in-directory-p path doom-emacs-dir))
+              ;; Omit `doom-private-dir', which is always first
+              (cdr (doom-module-load-path)))))
+   recompile-p
+   verbose-p))
 
-(dispatcher! (recompile rc) (doom-byte-compile args 'recompile)
-  "Re-byte-compiles outdated *.elc files.")
-
-(dispatcher! clean (doom-clean-byte-compiled-files)
-  "Delete all *.elc files.")
+(defcli! clean ()
+  "Delete all *.elc files."
+  :bare t
+  (doom-clean-byte-compiled-files))
 
 
 ;;
@@ -23,14 +49,19 @@ respectively.")
 
 (defun doom--byte-compile-ignore-file-p (path)
   (let ((filename (file-name-nondirectory path)))
-    (or (string-prefix-p "." filename)
+    (or (not (equal (file-name-extension path) "el"))
+        (member filename (list "packages.el" "doctor.el"))
+        (string-prefix-p "." filename)
         (string-prefix-p "test-" filename)
-        (not (equal (file-name-extension path) "el")))))
+        (string-prefix-p "flycheck_" filename)
+        (string-suffix-p ".example.el" filename))))
 
-(defun doom-byte-compile (&optional modules recompile-p)
+(cl-defun doom-cli-byte-compile (&optional targets recompile-p verbose-p)
   "Byte compiles your emacs configuration.
 
 init.el is always byte-compiled by this.
+
+If TARGETS is specified, as a list of direcotries
 
 If MODULES is specified (a list of module strings, e.g. \"lang/php\"), those are
 byte-compiled. Otherwise, all enabled modules are byte-compiled, including Doom
@@ -44,147 +75,135 @@ Use `doom-clean-byte-compiled-files' or `make clean' to reverse
 byte-compilation.
 
 If RECOMPILE-P is non-nil, only recompile out-of-date files."
-  (let ((default-directory doom-emacs-dir)
-        (total-ok   0)
-        (total-fail 0)
-        (total-noop 0)
-        compile-plugins-p
-        targets)
-    (dolist (module (delete-dups modules) (nreverse targets))
-      (pcase module
-        (":core"    (push doom-core-dir targets))
-        (":private" (push doom-private-dir targets))
-        (":plugins"
-         (cl-loop for (_name . desc) in (doom-get-package-alist)
-                  do (package--compile desc))
-         (setq compile-plugins-p t
-               modules (delete ":plugins" modules)))
-        ((pred file-directory-p)
-         (push module targets))
-        ((pred (string-match "^\\([^/]+\\)/\\([^/]+\\)$"))
-         (push (doom-module-locate-path
-                (doom-keyword-intern (match-string 1 module))
-                (intern (match-string 2 module)))
-               targets))))
-    (cl-block 'byte-compile
-      ;; If we're just here to byte-compile our plugins, we're done!
-      (and (not modules)
-           compile-plugins-p
-           (cl-return-from 'byte-compile t))
-      (unless (or (equal modules '(":core"))
-                  recompile-p)
-        (unless (or doom-auto-accept
-                    (y-or-n-p
-                     (concat "Warning: byte compiling is for advanced users. It will interfere with your\n"
-                             "efforts to debug issues. It is not recommended you do it if you frequently\n"
-                             "tinker with your Emacs config.\n\n"
-                             "Alternatively, use `bin/doom compile :core` instead to byte-compile only the\n"
-                             "Doom core files, as these don't change often.\n\n"
-                             "If you have issues, please make sure byte-compilation isn't the cause by using\n"
-                             "`bin/doom clean` to clear out your *.elc files.\n\n"
-                             "Byte-compile anyway?")))
-          (message "Aborting.")
-          (cl-return-from 'byte-compile)))
-      (when (and (not recompile-p)
-                 (or (null modules)
-                     (equal modules '(":core"))))
-        (doom-clean-byte-compiled-files))
-      (let (doom-emacs-changed-p
-            noninteractive)
-        ;; But first we must be sure that Doom and your private config have been
-        ;; fully loaded. Which usually aren't so in an noninteractive session.
-        (unless (and (doom-initialize-autoloads doom-autoload-file)
-                     (doom-initialize-autoloads doom-package-autoload-file))
-          (doom-reload-autoloads))
-        (doom-initialize)
-        (doom-initialize-modules 'force))
-      ;; If no targets were supplied, then we use your module list.
-      (unless modules
-        (let ((doom-modules-dirs (delete (expand-file-name "modules/" doom-private-dir)
-                                         doom-modules-dirs)))
-          (setq targets
-                (append (list doom-core-dir)
-                        (delete doom-private-dir (doom-module-load-path))))))
-      ;; Assemble el files we want to compile; taking into account that
-      ;; MODULES may be a list of MODULE/SUBMODULE strings from the command
-      ;; line.
-      (let ((target-files (doom-files-in targets :filter #'doom--byte-compile-ignore-file-p :sort nil)))
-        (when (or (not modules)
-                  (member ":core" modules))
-          (push (expand-file-name "init.el" doom-emacs-dir)
-                target-files))
-        (unless target-files
-          (if targets
-              (message "Couldn't find any valid targets")
-            (message "No targets to %scompile" (if recompile-p "re" "")))
-          (cl-return-from 'byte-compile))
-        (require 'use-package)
-        (condition-case e
-            (let ((use-package-defaults use-package-defaults)
+  (let* ((default-directory doom-emacs-dir)
+         (targets (nreverse (delete-dups targets)))
+         ;; In case it is changed during compile-time
+         (auto-mode-alist auto-mode-alist)
+         kill-emacs-hook kill-buffer-query-functions)
+
+    (let ((after-load-functions
+           (if (null targets)
+               after-load-functions
+             ;; Assemble el files we want to compile, and preserve in the order
+             ;; they are loaded in, so we don't run into any scary catch-22s
+             ;; while byte-compiling, like missing macros.
+             (cons (let ((target-dirs (cl-remove-if-not #'file-directory-p targets)))
+                     (lambda (path)
+                       (and (not (doom--byte-compile-ignore-file-p path))
+                            (cl-find-if (doom-partial #'file-in-directory-p path)
+                                        target-dirs)
+                            (cl-pushnew path targets))))
+                   after-load-functions))))
+      (doom-log "Reloading Doom in preparation for byte-compilation")
+      ;; But first we must be sure that Doom and your private config have been
+      ;; fully loaded. Which usually aren't so in an noninteractive session.
+      (let ((load-prefer-newer t)
+            (noninteractive t)
+            doom-interactive-p)
+        (doom-initialize 'force)
+        (quiet! (doom-initialize-packages))))
+
+    (if (null targets)
+        (print! (info "No targets to %scompile" (if recompile-p "re" "")))
+      (print! (start "%scompiling your config...")
+              (if recompile-p "Re" "Byte-"))
+
+      (dolist (dir
+               (cl-remove-if-not #'file-directory-p targets)
+               (setq targets (cl-remove-if #'file-directory-p targets)))
+        (prependq! targets
+                   (doom-files-in
+                    dir :match "\\.el" :filter #'doom--byte-compile-ignore-file-p)))
+
+      (print-group!
+       (require 'use-package)
+       (condition-case-unless-debug e
+           (let* ((total-ok   0)
+                  (total-fail 0)
+                  (total-noop 0)
+                  (byte-compile-verbose nil)
+                  (byte-compile-warnings '(not free-vars unresolved noruntime lexical make-local))
+                  (byte-compile-dynamic-docstrings t)
+                  (use-package-compute-statistics nil)
+                  (use-package-defaults use-package-defaults)
                   (use-package-expand-minimally t)
-                  (load-path load-path)
-                  kill-emacs-hook kill-buffer-query-functions)
-              ;; Prevent packages from being loaded at compile time if they
-              ;; don't meet their own predicates.
-              (push (list :no-require t
-                          (lambda (_name args)
-                            (or (when-let (pred (or (plist-get args :if)
-                                                    (plist-get args :when)))
-                                  (not (eval pred t)))
-                                (when-let (pred (plist-get args :unless))
-                                  (eval pred t)))))
-                    use-package-defaults)
-              (dolist (target (cl-delete-duplicates (mapcar #'file-truename target-files) :test #'equal))
-                (if (or (not recompile-p)
-                        (let ((elc-file (byte-compile-dest-file target)))
-                          (and (file-exists-p elc-file)
-                               (file-newer-than-file-p target elc-file))))
-                    (let ((result (if (or (string-match-p "/\\(?:packages\\|doctor\\)\\.el$" target)
-                                          (not (doom--file-cookie-p target)))
-                                      'no-byte-compile
-                                    (byte-compile-file target)))
-                          (short-name (if (file-in-directory-p target doom-emacs-dir)
-                                          (file-relative-name target doom-emacs-dir)
-                                        (abbreviate-file-name target))))
-                      (cl-incf
-                       (cond ((eq result 'no-byte-compile)
-                              (print! (dark (white "⚠ Ignored %s")) short-name)
-                              total-noop)
-                             ((null result)
-                              (print! (red "✕ Failed to compile %s") short-name)
-                              total-fail)
-                             (t
-                              (print! (green "✓ Compiled %s") short-name)
-                              (load target t t)
-                              total-ok))))
-                  (cl-incf total-noop)))
-              (print! (bold (color (if (= total-fail 0) 'green 'red)
-                                   "%s %d/%d file(s) (%d ignored)"))
-                      (if recompile-p "Recompiled" "Compiled")
-                      total-ok (- (length target-files) total-noop)
-                      total-noop)
-              (or (= total-fail 0)
-               (error "Failed to compile some files")))
-          ((debug error)
-           (print! (red "\nThere were breaking errors.\n\n%s")
-                   "Reverting changes...")
-           (signal 'doom-error (list 'byte-compile e))))))))
+                  (targets (delete-dups targets))
+                  (modules (seq-group-by #'doom-module-from-path targets))
+                  (total-files (length targets))
+                  (total-modules (length modules))
+                  (i 0)
+                  last-module)
+             ;; Prevent packages from being loaded at compile time if they
+             ;; don't meet their own predicates.
+             (push (list :no-require t
+                         (lambda (_name args)
+                           (or (when-let (pred (or (plist-get args :if)
+                                                   (plist-get args :when)))
+                                 (not (eval pred t)))
+                               (when-let (pred (plist-get args :unless))
+                                 (eval pred t)))))
+                   use-package-defaults)
+             (dolist (module-files modules)
+               (cl-incf i)
+               (dolist (target (cdr module-files))
+                 (let ((elc-file (byte-compile-dest-file target)))
+                   (cl-incf
+                    (if (and recompile-p (not (file-newer-than-file-p target elc-file)))
+                        total-noop
+                      (pcase (if (not (doom-file-cookie-p target "if" t))
+                                 'no-byte-compile
+                               (unless (equal last-module (car module-files))
+                                 (print! (success "(% 3d/%d) Compiling %s")
+                                         i total-modules
+                                         (if-let (m (caar module-files))
+                                             (format "%s %s module..." m (cdar module-files))
+                                           (format "%d stand alone elisp files..."
+                                                   (length (cdr module-files))))
+                                         (caar module-files) (cdar module-files))
+                                 (setq last-module (car module-files)))
+                               (if verbose-p
+                                   (byte-compile-file target)
+                                 (quiet! (byte-compile-file target))))
+                        (`no-byte-compile
+                         (print! (debug "(% 3d/%d) Ignored %s")
+                                 i total-modules (relpath target))
+                         total-noop)
+                        (`nil
+                         (print! (error "(% 3d/%d) Failed to compile %s")
+                                 i total-modules (relpath target))
+                         total-fail)
+                        (_ total-ok)))))))
+             (print! (class (if (= total-fail 0) 'success 'warn)
+                            "%s %d/%d file(s) (%d ignored)")
+                     (if recompile-p "Recompiled" "Byte-compiled")
+                     total-ok total-files
+                     total-noop)
+             (= total-fail 0))
+         ((debug error)
+          (print! (error "There were breaking errors.\n\n%s")
+                  "Reverting changes...")
+          (signal 'doom-error (list 'byte-compile e))))))))
 
 (defun doom-clean-byte-compiled-files ()
   "Delete all the compiled elc files in your Emacs configuration and private
 module. This does not include your byte-compiled, third party packages.'"
-  (cl-loop with default-directory = doom-emacs-dir
-           for path
-           in (append (doom-files-in doom-emacs-dir :match "\\.elc$" :depth 0 :sort nil)
-                      (doom-files-in doom-private-dir :match "\\.elc$" :depth 1 :sort nil)
-                      (doom-files-in doom-core-dir :match "\\.elc$" :sort nil)
-                      (doom-files-in doom-modules-dirs :match "\\.elc$" :depth 4 :sort nil))
-           for truepath = (file-truename path)
-           if (file-exists-p path)
-           do (delete-file path)
-           and do
-           (print! (green "✓ Deleted %s")
-                   (if (file-in-directory-p truepath default-directory)
-                       (file-relative-name truepath)
-                     (abbreviate-file-name truepath)))
-           finally do (print! (bold (green "Everything is clean")))))
+  (require 'core-modules)
+  (print! (start "Cleaning .elc files"))
+  (print-group!
+   (cl-loop with default-directory = doom-emacs-dir
+            with success = 0
+            with esc = (if doom-debug-p "" "\033[1A")
+            for path
+            in (append (doom-glob doom-emacs-dir "*.elc")
+                       (doom-files-in doom-private-dir :match "\\.elc$" :depth 1)
+                       (doom-files-in doom-core-dir :match "\\.elc$")
+                       (doom-files-in doom-modules-dirs :match "\\.elc$" :depth 4))
+            if (file-exists-p path)
+            do (delete-file path)
+            and do (print! (success "\033[KDeleted %s%s") (relpath path) esc)
+            and do (cl-incf success)
+            finally do
+            (print! (if (> success 0)
+                        (success "\033[K%d elc files deleted" success)
+                      (info "\033[KNo elc files to clean"))))
+   t))

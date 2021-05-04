@@ -1,36 +1,52 @@
 ;;; lang/scala/config.el -*- lexical-binding: t; -*-
 
+(after! projectile
+  (add-to-list 'projectile-project-root-files "build.sbt"))
+
+
+;;
+;;; Packages
+
 (after! scala-mode
   (setq scala-indent:align-parameters t
         ;; indent block comments to first asterix, not second
         scala-indent:use-javadoc-style t)
 
-  (setq-hook! 'scala-mode-hook comment-line-break-function #'+scala-comment-indent-new-line)
-
-  (after! dtrt-indent
-    (add-to-list 'dtrt-indent-hook-mapping-list '(scala-mode c/c++/java scala-indent:step)))
+  (setq-hook! 'scala-mode-hook
+    comment-line-break-function #'+scala-comment-indent-new-line-fn)
 
   (when (featurep! +lsp)
-    (add-hook 'scala-mode-local-vars-hook #'lsp!)))
+    (setq-hook! 'scala-mode-hook lsp-enable-indentation nil)
+    (add-hook 'scala-mode-local-vars-hook #'lsp!))
+
+  (set-ligatures! 'scala-mode
+    ;; Functional
+    :def "def"
+    :composition  "compose"
+    ;; HKT
+    :lambda       "Lambda"
+    ;; Types
+    :null         "none"
+    :null         "None"
+    :true         "true"
+    :false        "false"
+    :int          "Int"
+    :str          "String"
+    :float        "Float"
+    :bool         "Boolean"
+    :list         "List"
+    ;; Flow
+    :for          "for"
+    :not          "!"
+    :and          "&&"
+    :or           "||"
+    :yield        "yield"
+    ;; Other
+    :union        "union"
+    :intersect    "intersect"
+    :diff         "diff"))
 
 
-(def-package! ensime
-  :unless (featurep! +lsp)
-  :defer t
-  :config
-  (setq ensime-startup-snapshot-notification nil
-        ensime-startup-notification nil
-        ensime-eldoc-hints 'all
-        ;; let DOOM handle company setup
-        ensime-completion-style nil)
-
-  (set-company-backend! 'scala-mode '(ensime-company company-yasnippet))
-
-  ;; Fix void-variable imenu-auto-rescan error caused by `ensime--setup-imenu'
-  ;; trying to make imenu variables buffer local before imenu is loaded.
-  (require 'imenu))
-
-
-(def-package! sbt-mode
+(use-package! sbt-mode
   :after scala-mode
-  :config (set-repl-handler! 'scala-mode #'+scala/open-repl))
+  :config (set-repl-handler! 'scala-mode #'+scala/open-repl :persist t))

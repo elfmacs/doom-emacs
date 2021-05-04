@@ -1,8 +1,7 @@
 ;;; tools/lookup/autoload/lookup.el -*- lexical-binding: t; -*-
 
 ;;;###autodef
-(cl-defun set-lookup-handlers!
-    (modes &rest plist &key definition references documentation file xref-backend async)
+(defun set-lookup-handlers! (modes &rest plist)
   "Define jump handlers for major or minor MODES.
 
 A handler is either an interactive command that changes the current buffer
@@ -16,6 +15,12 @@ properties:
 
 :definition FN
   Run when jumping to a symbol's definition. Used by `+lookup/definition'.
+:implementations FN
+  Run when looking for implementations of a symbol in the current project. Used
+  by `+lookup/implementations'.
+:type-definition FN
+  Run when jumping to a symbol's type definition. Used by
+  `+lookup/type-definition'.
 :references FN
   Run when looking for usage references of a symbol in the current project. Used
   by `+lookup/references'.
@@ -47,6 +52,7 @@ change the current buffer or window or return non-nil when it succeeds.
 
 If it doesn't change the current buffer, or it returns nil, the lookup module
 will fall back to the next handler in `+lookup-definition-functions',
+`+lookup-implementations-functions', `+lookup-type-definition-functions',
 `+lookup-references-functions', `+lookup-file-functions' or
 `+lookup-documentation-functions'.
 
@@ -56,33 +62,42 @@ defined for other minor modes or the major mode it's activated in.
 
 This can be passed nil as its second argument to unset handlers for MODES. e.g.
 
-  (set-lookup-handlers! 'python-mode nil)"
+  (set-lookup-handlers! 'python-mode nil)
+
+\(fn MODES &key DEFINITION IMPLEMENTATIONS TYPE-DEFINITION REFERENCES DOCUMENTATION FILE XREF-BACKEND ASYNC)"
   (declare (indent defun))
   (dolist (mode (doom-enlist modes))
     (let ((hook (intern (format "%s-hook" mode)))
-          (fn   (intern (format "+lookup|init-%s-handlers" mode))))
-      (cond ((null (car plist))
-             (remove-hook hook fn)
-             (unintern fn nil))
-            ((fset
-              fn
-              (lambda ()
-                (cl-mapc #'+lookup--set-handler
-                         (list definition
-                               references
-                               documentation
-                               file
-                               xref-backend)
-                         (list '+lookup-definition-functions
-                               '+lookup-references-functions
-                               '+lookup-documentation-functions
-                               '+lookup-file-functions
-                               'xref-backend-functions)
-                         (make-list 5 async)
-                         (make-list 5 (or (eq major-mode mode)
-                                          (and (boundp mode)
-                                               (symbol-value mode)))))))
-             (add-hook hook fn))))))
+          (fn   (intern (format "+lookup--init-%s-handlers-h" mode))))
+      (if (null (car plist))
+          (progn
+            (remove-hook hook fn)
+            (unintern fn nil))
+        (fset
+         fn
+         (lambda ()
+           (cl-destructuring-bind (&key definition implementations type-definition references documentation file xref-backend async)
+               plist
+             (cl-mapc #'+lookup--set-handler
+                      (list definition
+                            implementations
+                            type-definition
+                            references
+                            documentation
+                            file
+                            xref-backend)
+                      (list '+lookup-definition-functions
+                            '+lookup-implementations-functions
+                            '+lookup-type-definition-functions
+                            '+lookup-references-functions
+                            '+lookup-documentation-functions
+                            '+lookup-file-functions
+                            'xref-backend-functions)
+                      (make-list 5 async)
+                      (make-list 5 (or (eq major-mode mode)
+                                       (and (boundp mode)
+                                            (symbol-value mode))))))))
+        (add-hook hook fn)))))
 
 
 ;;
@@ -127,71 +142,87 @@ This can be passed nil as its second argument to unset handlers for MODES. e.g.
 
 (defun +lookup--jump-to (prop identifier &optional display-fn arg)
   (let* ((origin (point-marker))
-         (handlers (plist-get (list :definition '+lookup-definition-functions
-                                    :references '+lookup-references-functions
-                                    :documentation '+lookup-documentation-functions
-                                    :file '+lookup-file-functions)
-                              prop))
+         (handlers
+          (plist-get (list :definition '+lookup-definition-functions
+                           :implementations '+lookup-implementations-functions
+                           :type-definition '+lookup-type-definition-functions
+                           :references '+lookup-references-functions
+                           :documentation '+lookup-documentation-functions
+                           :file '+lookup-file-functions)
+                     prop))
          (result
           (if arg
-              (if-let*
-                  ((handler (intern-soft
-                             (completing-read "Select lookup handler: "
-                                              (remq t (append (symbol-value handlers)
-                                                              (default-value handlers)))
-                                              nil t))))
+              (if-let
+                  (handler
+                   (intern-soft
+                    (completing-read "Select lookup handler: "
+                                     (delete-dups
+                                      (remq t (append (symbol-value handlers)
+                                                      (default-value handlers))))
+                                     nil t)))
                   (+lookup--run-handlers handler identifier origin)
                 (user-error "No lookup handler selected"))
             (run-hook-wrapped handlers #'+lookup--run-handlers identifier origin))))
-    (when (cond ((null result)
-                 (message "No lookup handler could find %S" identifier)
-                 nil)
-                ((markerp result)
-                 (funcall (or display-fn #'switch-to-buffer)
-                          (marker-buffer result))
-                 (goto-char result)
-                 result)
-                (result))
-      (with-current-buffer (marker-buffer origin)
-        (better-jumper-set-jump (marker-position origin)))
-      result)))
-
-;;;###autoload
-(defun +lookup-symbol-or-region (&optional initial)
-  "Grab the symbol at point or selected region."
-  (cond ((stringp initial)
-         initial)
-        ((use-region-p)
-         (buffer-substring-no-properties (region-beginning)
-                                         (region-end)))
-        ((require 'xref nil t)
-         ;; A little smarter than using `symbol-at-point', though in most cases,
-         ;; xref ends up using `symbol-at-point' anyway.
-         (xref-backend-identifier-at-point (xref-find-backend)))))
+    (unwind-protect
+        (when (cond ((null result)
+                     (message "No lookup handler could find %S" identifier)
+                     nil)
+                    ((markerp result)
+                     (funcall (or display-fn #'switch-to-buffer)
+                              (marker-buffer result))
+                     (goto-char result)
+                     result)
+                    (result))
+          (with-current-buffer (marker-buffer origin)
+            (better-jumper-set-jump (marker-position origin)))
+          result)
+      (set-marker origin nil))))
 
 
 ;;
 ;;; Lookup backends
 
-(defun +lookup--xref-show (fn identifier)
+(autoload 'xref--show-defs "xref")
+(defun +lookup--xref-show (fn identifier &optional show-fn)
   (let ((xrefs (funcall fn
                         (xref-find-backend)
                         identifier)))
     (when xrefs
-      (xref--show-xrefs xrefs nil)
-      (if (cdr xrefs)
-          'deferred
-        t))))
+      (let ((marker-ring (ring-copy xref--marker-ring)))
+        (funcall (or show-fn #'xref--show-defs)
+                 (lambda () xrefs)
+                 nil)
+        (if (cdr xrefs)
+            'deferred
+          ;; xref will modify its marker stack when it finds a result to jump to.
+          ;; Use that to determine success.
+          (not (equal xref--marker-ring marker-ring)))))))
 
-(defun +lookup-xref-definitions-backend (identifier)
+(defun +lookup-dictionary-definition-backend-fn (identifier)
+  "Look up dictionary definition for IDENTIFIER."
+  (when (derived-mode-p 'text-mode)
+    (+lookup/dictionary-definition identifier)
+    'deferred))
+
+(defun +lookup-thesaurus-definition-backend-fn (identifier)
+  "Look up synonyms for IDENTIFIER."
+  (when (derived-mode-p 'text-mode)
+    (+lookup/synonyms identifier)
+    'deferred))
+
+(defun +lookup-xref-definitions-backend-fn (identifier)
   "Non-interactive wrapper for `xref-find-definitions'"
-  (+lookup--xref-show 'xref-backend-definitions identifier))
+  (condition-case _
+      (+lookup--xref-show 'xref-backend-definitions identifier #'xref--show-defs)
+    (cl-no-applicable-method nil)))
 
-(defun +lookup-xref-references-backend (identifier)
+(defun +lookup-xref-references-backend-fn (identifier)
   "Non-interactive wrapper for `xref-find-references'"
-  (+lookup--xref-show 'xref-backend-references identifier))
+  (condition-case _
+      (+lookup--xref-show 'xref-backend-references identifier #'xref--show-xrefs)
+    (cl-no-applicable-method nil)))
 
-(defun +lookup-dumb-jump-backend (_identifier)
+(defun +lookup-dumb-jump-backend-fn (_identifier)
   "Look up the symbol at point (or selection) with `dumb-jump', which conducts a
 project search with ag, rg, pt, or git-grep, combined with extra heuristics to
 reduce false positives.
@@ -200,34 +231,73 @@ This backend prefers \"just working\" over accuracy."
   (and (require 'dumb-jump nil t)
        (dumb-jump-go)))
 
-(defun +lookup-project-search-backend (identifier)
+(defun +lookup-project-search-backend-fn (identifier)
   "Conducts a simple project text search for IDENTIFIER.
 
 Uses and requires `+ivy-file-search' or `+helm-file-search'. Will return nil if
-neither is available. These search backends will use ag, rg, or pt (in an order
-dictated by `+ivy-project-search-engines' or `+helm-project-search-engines',
-falling back to git-grep)."
+neither is available. These require ripgrep to be installed."
   (unless identifier
     (let ((query (rxt-quote-pcre identifier)))
       (ignore-errors
         (cond ((featurep! :completion ivy)
-               (+ivy-file-search nil :query query)
+               (+ivy-file-search :query query)
                t)
               ((featurep! :completion helm)
-               (+helm-file-search nil :query query)
+               (+helm-file-search :query query)
                t))))))
 
-(defun +lookup-evil-goto-definition-backend (_identifier)
+(defun +lookup-evil-goto-definition-backend-fn (_identifier)
   "Uses `evil-goto-definition' to conduct a text search for IDENTIFIER in the
 current buffer."
-  (and (fboundp 'evil-goto-definition)
-       (ignore-errors
-         (cl-destructuring-bind (beg . end)
-             (bounds-of-thing-at-point 'symbol)
-           (evil-goto-definition)
-           (let ((pt (point)))
-             (not (and (>= pt beg)
-                       (<  pt end))))))))
+  (when (fboundp 'evil-goto-definition)
+    (ignore-errors
+      (cl-destructuring-bind (beg . end)
+          (bounds-of-thing-at-point 'symbol)
+        (evil-goto-definition)
+        (let ((pt (point)))
+          (not (and (>= pt beg)
+                    (<  pt end))))))))
+
+(defun +lookup-ffap-backend-fn (identifier)
+  "Tries to locate the file at point (or in active selection).
+Uses find-in-project functionality (provided by ivy, helm, or project),
+otherwise falling back to ffap.el (find-file-at-point)."
+  (let ((guess
+         (cond (identifier)
+               ((doom-region-active-p)
+                (buffer-substring-no-properties
+                 (doom-region-beginning)
+                 (doom-region-end)))
+               ((if (require 'ffap) (ffap-guesser)))
+               ((thing-at-point 'filename t)))))
+    (cond ((and (stringp guess)
+                (or (file-exists-p guess)
+                    (ffap-url-p guess)))
+           (find-file-at-point guess))
+          ((and (featurep! :completion ivy)
+                (doom-project-p))
+           (counsel-file-jump guess (doom-project-root)))
+          ((find-file-at-point (ffap-prompter guess))))
+    t))
+
+(defun +lookup-bug-reference-backend-fn (_identifier)
+  "Searches for a bug reference in user/repo#123 or #123 format and opens it in
+the browser."
+  (require 'bug-reference)
+  (let ((bug-reference-url-format bug-reference-url-format)
+        (bug-reference-bug-regexp bug-reference-bug-regexp)
+        (bug-reference-mode (derived-mode-p 'text-mode 'conf-mode))
+        (bug-reference-prog-mode (derived-mode-p 'prog-mode)))
+    (bug-reference--run-auto-setup)
+    (unwind-protect
+        (catch 'found
+          (bug-reference-fontify (line-beginning-position) (line-end-position))
+          (dolist (o (overlays-at (point)))
+            ;; It should only be possible to have one URL overlay.
+            (when-let (url (overlay-get o 'bug-reference-url))
+              (browse-url url)
+              (throw 'found t))))
+      (bug-reference-unfontify (line-beginning-position) (line-end-position)))))
 
 
 ;;
@@ -241,10 +311,34 @@ Each function in `+lookup-definition-functions' is tried until one changes the
 point or current buffer. Falls back to dumb-jump, naive
 ripgrep/the_silver_searcher text search, then `evil-goto-definition' if
 evil-mode is active."
-  (interactive (list (+lookup-symbol-or-region)
+  (interactive (list (doom-thing-at-point-or-region)
                      current-prefix-arg))
   (cond ((null identifier) (user-error "Nothing under point"))
         ((+lookup--jump-to :definition identifier nil arg))
+        ((error "Couldn't find the definition of %S" identifier))))
+
+;;;###autoload
+(defun +lookup/implementations (identifier &optional arg)
+  "Jump to the implementations of IDENTIFIER (defaults to the symbol at point).
+
+Each function in `+lookup-implementations-functions' is tried until one changes
+the point or current buffer."
+  (interactive (list (doom-thing-at-point-or-region)
+                     current-prefix-arg))
+  (cond ((null identifier) (user-error "Nothing under point"))
+        ((+lookup--jump-to :implementations identifier nil arg))
+        ((error "Couldn't find the implementations of %S" identifier))))
+
+;;;###autoload
+(defun +lookup/type-definition (identifier &optional arg)
+  "Jump to the type definition of IDENTIFIER (defaults to the symbol at point).
+
+Each function in `+lookup-type-definition-functions' is tried until one changes
+the point or current buffer."
+  (interactive (list (doom-thing-at-point-or-region)
+                     current-prefix-arg))
+  (cond ((null identifier) (user-error "Nothing under point"))
+        ((+lookup--jump-to :type-definition identifier nil arg))
         ((error "Couldn't find the definition of %S" identifier))))
 
 ;;;###autoload
@@ -254,7 +348,7 @@ evil-mode is active."
 Tries each function in `+lookup-references-functions' until one changes the
 point and/or current buffer. Falls back to a naive ripgrep/the_silver_searcher
 search otherwise."
-  (interactive (list (+lookup-symbol-or-region)
+  (interactive (list (doom-thing-at-point-or-region)
                      current-prefix-arg))
   (cond ((null identifier) (user-error "Nothing under point"))
         ((+lookup--jump-to :references identifier nil arg))
@@ -267,52 +361,66 @@ search otherwise."
 First attempts the :documentation handler specified with `set-lookup-handlers!'
 for the current mode/buffer (if any), then falls back to the backends in
 `+lookup-documentation-functions'."
-  (interactive (list (+lookup-symbol-or-region)
+  (interactive (list (doom-thing-at-point-or-region)
                      current-prefix-arg))
   (cond ((+lookup--jump-to :documentation identifier #'pop-to-buffer arg))
         ((user-error "Couldn't find documentation for %S" identifier))))
 
-(defvar ffap-file-finder)
 ;;;###autoload
-(defun +lookup/file (path)
+(defun +lookup/file (&optional path)
   "Figure out PATH from whatever is at point and open it.
 
 Each function in `+lookup-file-functions' is tried until one changes the point
 or the current buffer.
 
 Otherwise, falls back on `find-file-at-point'."
+  (interactive)
+  (cond ((and path
+              buffer-file-name
+              (file-equal-p path buffer-file-name)
+              (user-error "Already here")))
+
+        ((+lookup--jump-to :file path))
+
+        ((user-error "Couldn't find any files here"))))
+
+
+;;
+;;; Dictionary
+
+;;;###autoload
+(defun +lookup/dictionary-definition (identifier &optional arg)
+  "Look up the definition of the word at point (or selection)."
   (interactive
-   (progn
-     (require 'ffap)
-     (list
-      (or (ffap-guesser)
-          (ffap-read-file-or-url
-           (if ffap-url-regexp "Find file or URL: " "Find file: ")
-           (+lookup-symbol-or-region))))))
-  (require 'ffap)
-  (cond ((not path)
-         (call-interactively #'find-file-at-point))
+   (list (or (doom-thing-at-point-or-region 'word)
+             (read-string "Look up in dictionary: "))
+         current-prefix-arg))
+  (message "Looking up dictionary definition for %S" identifier)
+  (cond ((and IS-MAC (require 'osx-dictionary nil t))
+         (osx-dictionary--view-result identifier))
+        ((and +lookup-dictionary-prefer-offline
+              (require 'wordnut nil t))
+         (unless (executable-find wordnut-cmd)
+           (user-error "Couldn't find %S installed on your system"
+                       wordnut-cmd))
+         (wordnut-search identifier))
+        ((require 'define-word nil t)
+         (define-word identifier nil arg))
+        ((user-error "No dictionary backend is available"))))
 
-        ((ffap-url-p path)
-         (find-file-at-point path))
-
-        ((not (+lookup--jump-to :file path))
-         (let ((fullpath (expand-file-name path)))
-           (when (and buffer-file-name (file-equal-p fullpath buffer-file-name))
-             (user-error "Already here"))
-           (let* ((insert-default-directory t)
-                  (project-root (doom-project-root))
-                  (ffap-file-finder
-                   (cond ((not (file-directory-p fullpath))
-                          #'find-file)
-                         ((ignore-errors (file-in-directory-p fullpath project-root))
-                          (lambda (dir)
-                            (let ((default-directory dir))
-                              (without-project-cache!
-                               (let ((file (projectile-completing-read "Find file: "
-                                                                       (projectile-current-project-files)
-                                                                       :initial-input path)))
-                                 (find-file (expand-file-name file (doom-project-root)))
-                                 (run-hooks 'projectile-find-file-hook))))))
-                         (#'doom-project-browse))))
-             (find-file-at-point path))))))
+;;;###autoload
+(defun +lookup/synonyms (identifier &optional _arg)
+  "Look up and insert a synonym for the word at point (or selection)."
+  (interactive
+   (list (doom-thing-at-point-or-region 'word) ; TODO actually use this
+         current-prefix-arg))
+  (message "Looking up synonyms for %S" identifier)
+  (cond ((and +lookup-dictionary-prefer-offline
+              (require 'synosaurus-wordnet nil t))
+         (unless (executable-find synosaurus-wordnet--command)
+           (user-error "Couldn't find %S installed on your system"
+                       synosaurus-wordnet--command))
+         (synosaurus-choose-and-replace))
+        ((require 'powerthesaurus nil t)
+         (powerthesaurus-lookup-word-dwim))
+        ((user-error "No thesaurus backend is available"))))

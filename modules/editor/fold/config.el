@@ -17,21 +17,22 @@
 ;;
 ;; Packages
 
-(def-package! hideshow ; built-in
-  :commands (hs-toggle-hiding hs-hide-block hs-hide-level hs-show-all hs-hide-all)
+(use-package! hideshow ; built-in
+  :commands (hs-toggle-hiding
+             hs-hide-block
+             hs-hide-level
+             hs-show-all
+             hs-hide-all)
   :config
   (setq hs-hide-comments-when-hiding-all nil
         ;; Nicer code-folding overlays (with fringe indicators)
-        hs-set-up-overlay #'+fold-hideshow-set-up-overlay)
+        hs-set-up-overlay #'+fold-hideshow-set-up-overlay-fn)
 
-  (defun +fold-hideshow*ensure-mode (&rest _)
-    "Ensure `hs-minor-mode' is enabled."
+  (defadvice! +fold--hideshow-ensure-mode-a (&rest _)
+    "Ensure `hs-minor-mode' is enabled when we need it, no sooner or later."
+    :before '(hs-toggle-hiding hs-hide-block hs-hide-level hs-show-all hs-hide-all)
     (unless (bound-and-true-p hs-minor-mode)
       (hs-minor-mode +1)))
-  (advice-add! '(hs-toggle-hiding
-                 hs-hide-block hs-hide-level
-                 hs-show-all hs-hide-all)
-               :before #'+fold-hideshow*ensure-mode)
 
   ;; extra folding support for more languages
   (unless (assq 't hs-special-modes-alist)
@@ -41,27 +42,35 @@
              (yaml-mode "\\s-*\\_<\\(?:[^:]+\\)\\_>"
                         ""
                         "#"
-                        +fold-hideshow-forward-block-by-indent nil)
-             (haml-mode "[#.%]" "\n" "/" +fold-hideshow-haml-forward-sexp nil)
+                        +fold-hideshow-forward-block-by-indent-fn nil)
+             (haml-mode "[#.%]" "\n" "/" +fold-hideshow-haml-forward-sexp-fn nil)
              (ruby-mode "class\\|d\\(?:ef\\|o\\)\\|module\\|[[{]"
                         "end\\|[]}]"
                         "#\\|=begin"
                         ruby-forward-sexp)
-             (enh-ruby-mode "class\\|d\\(?:ef\\|o\\)\\|module\\|[[{]"
-                            "end\\|[]}]"
-                            "#\\|=begin"
-                            enh-ruby-forward-sexp nil)
              (matlab-mode "if\\|switch\\|case\\|otherwise\\|while\\|for\\|try\\|catch"
                           "end"
                           nil (lambda (_arg) (matlab-forward-sexp)))
              (nxml-mode "<!--\\|<[^/>]*[^/]>"
                         "-->\\|</[^/>]*[^/]>"
-                        "<!--" sgml-skip-tag-forward nil))
+                        "<!--" sgml-skip-tag-forward nil)
+             (latex-mode
+              ;; LaTeX-find-matching-end needs to be inside the env
+              ("\\\\begin{[a-zA-Z*]+}\\(\\)" 1)
+              "\\\\end{[a-zA-Z*]+}"
+              "%"
+              (lambda (_arg)
+                ;; Don't fold whole document, that's useless
+                (unless (save-excursion
+                          (search-backward "\\begin{document}"
+                                           (line-beginning-position) t))
+                  (LaTeX-find-matching-end)))
+              nil))
            hs-special-modes-alist
            '((t))))))
 
 
-(def-package! evil-vimish-fold
+(use-package! evil-vimish-fold
   :when (featurep! :editor evil)
   :commands (evil-vimish-fold/next-fold evil-vimish-fold/previous-fold
              evil-vimish-fold/delete evil-vimish-fold/delete-all

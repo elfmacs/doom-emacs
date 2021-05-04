@@ -3,9 +3,9 @@
 (defvar +calendar--wconf nil)
 
 (defun +calendar--init ()
-  (if-let* ((win (cl-loop for win in (doom-visible-windows)
-                          if (string-match-p "^\\*cfw:" (buffer-name (window-buffer win)))
-                          return win)))
+  (if-let (win (cl-find-if (lambda (b) (string-match-p "^\\*cfw:" (buffer-name b)))
+                           (doom-visible-windows)
+                           :key #'window-buffer))
       (select-window win)
     (call-interactively +calendar-open-function)))
 
@@ -29,10 +29,12 @@
   "TODO"
   (interactive)
   (if (featurep! :ui workspaces)
-      (+workspace/delete "Calendar")
-    (doom-kill-matching-buffers "^\\*cfw:")
-    (set-window-configuration +calendar--wconf)
-    (setq +calendar--wconf nil)))
+      (when (+workspace-exists-p "Calendar")
+        (+workspace/delete "Calendar"))
+    (when (window-configuration-p +calendar--wconf)
+      (set-window-configuration +calendar--wconf))
+    (setq +calendar--wconf nil))
+  (doom-kill-matching-buffers "^\\*cfw[:-]"))
 
 ;;;###autoload
 (defun +calendar/open-calendar ()
@@ -46,7 +48,7 @@
     )))
 
 ;;;###autoload
-(defun +calendar*cfw:render-button (title command &optional state)
+(defun +calendar-cfw:render-button-a (title command &optional state)
   "render-button
  TITLE
  COMMAND

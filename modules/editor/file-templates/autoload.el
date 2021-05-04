@@ -41,7 +41,7 @@ these properties:
 
 ;;;###autodef
 (defun set-file-templates! (&rest templates)
-  "Like `set-file-templates!', but can register multiple file templates at once.
+  "Like `set-file-template!', but can register multiple file templates at once.
 
 \(fn &rest (PRED &key WHEN TRIGGER MODE PROJECT IGNORE))"
   (defer-until! (boundp '+file-templates-alist)
@@ -89,19 +89,9 @@ evil is loaded and enabled)."
              (match-string 1 path))
             ((file-in-directory-p path doom-emacs-dir)
              (file-relative-name path doom-emacs-dir))
+            ((file-in-directory-p path doom-private-dir)
+             (file-relative-name path doom-private-dir))
             ((abbreviate-file-name path))))))
-
-;;;###autoload
-(defun +file-template-p (rule)
-  "Return t if RULE applies to the current buffer."
-  (let ((pred (car rule))
-        (plist (cdr rule)))
-    (and (cond ((and (stringp pred) buffer-file-name)
-                (string-match-p pred buffer-file-name))
-               ((symbolp pred) (eq major-mode pred)))
-         (or (not (plist-member plist :when))
-             (funcall (plist-get plist :when) buffer-file-name))
-         rule)))
 
 
 ;;
@@ -112,6 +102,8 @@ evil is loaded and enabled)."
   "Insert a license file template into the current file."
   (interactive)
   (require 'yasnippet)
+  (unless (gethash 'text-mode yas--tables)
+    (yas-reload-all t))
   (let ((templates
          (let (yas-choose-tables-first ; avoid prompts
                yas-choose-keys-first)

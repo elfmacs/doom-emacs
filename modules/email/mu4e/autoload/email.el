@@ -6,7 +6,7 @@
 list of cons cells (VARIABLE . VALUE) -- you may want to modify:
 
  + `user-full-name' (this or the global `user-full-name' is required)
- + `user-mail-address' (required)
+ + `user-mail-address' (required in mu4e < 1.4)
  + `smtpmail-smtp-user' (required for sending mail from Emacs)
 
 OPTIONAL:
@@ -19,8 +19,9 @@ OPTIONAL:
 DEFAULT-P is a boolean. If non-nil, it marks that email account as the
 default/fallback account."
   (after! mu4e
-    (when-let (address (cdr (assq 'user-mail-address letvars)))
-      (add-to-list 'mu4e-user-mail-address-list address))
+    (when (version< mu4e-mu-version "1.4")
+      (when-let (address (cdr (assq 'user-mail-address letvars)))
+        (add-to-list 'mu4e-user-mail-address-list address)))
     (setq mu4e-contexts
           (cl-loop for context in mu4e-contexts
                    unless (string= (mu4e-context-name context) label)
@@ -44,15 +45,20 @@ default/fallback account."
 
 (defvar +mu4e-workspace-name "*mu4e*"
   "TODO")
+(defvar +mu4e--old-wconf nil)
 
-(add-hook 'mu4e-main-mode-hook #'+mu4e|init)
+(add-hook 'mu4e-main-mode-hook #'+mu4e-init-h)
 
 ;;;###autoload
 (defun =mu4e ()
   "Start email client."
   (interactive)
   (require 'mu4e)
-  (+workspace-switch +mu4e-workspace-name t)
+  (if (featurep! :ui workspaces)
+      (+workspace-switch +mu4e-workspace-name t)
+    (setq +mu4e--old-wconf (current-window-configuration))
+    (delete-other-windows)
+    (switch-to-buffer (doom-fallback-buffer)))
   (mu4e~start 'mu4e~main-view)
   ;; (save-selected-window
   ;;   (prolusion-mail-show))
@@ -69,10 +75,15 @@ default/fallback account."
 ;;
 ;; Hooks
 
-(defun +mu4e|init ()
-  (add-hook 'kill-buffer-hook #'+mu4e|kill-mu4e nil t))
+(defun +mu4e-init-h ()
+  (add-hook 'kill-buffer-hook #'+mu4e-kill-mu4e-h nil t))
 
-(defun +mu4e|kill-mu4e ()
+(defun +mu4e-kill-mu4e-h ()
   ;; (prolusion-mail-hide)
-  (when (+workspace-exists-p +mu4e-workspace-name)
-    (+workspace/delete +mu4e-workspace-name)))
+  (cond
+   ((and (featurep! :ui workspaces) (+workspace-exists-p +mu4e-workspace-name))
+    (+workspace/delete +mu4e-workspace-name))
+
+   (+mu4e--old-wconf
+    (set-window-configuration +mu4e--old-wconf)
+    (setq +mu4e--old-wconf nil))))

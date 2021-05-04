@@ -10,11 +10,14 @@
 - [[#prerequisites][Prerequisites]]
   - [[#macos][MacOS]]
   - [[#arch-linux][Arch Linux]]
+  - [[#opensuse][openSUSE]]
+- [[#troubleshooting][Troubleshooting]]
+  - [[#tide-sort-completions-by-kind-isnt-respected][~tide-sort-completions-by-kind~ isn't respected]]
 - [[#appendix][Appendix]]
   - [[#commands][Commands]]
 
 * Description
-This module adds Javascript support.
+This module adds JavaScript and TypeScript support.
 
 + Code completion (tide)
 + REPL support (nodejs-repl)
@@ -34,7 +37,6 @@ This module adds Javascript support.
 + [[https://github.com/mooz/js2-mode][js2-mode]]
 + [[https://github.com/felipeochoa/rjsx-mode][rjsx-mode]]
 + [[https://github.com/emacs-typescript/typescript.el][typescript-mode]]
-+ [[https://github.com/aaronjensen/eslintd-fix][eslintd-fix]]
 + [[https://github.com/magnars/js2-refactor.el][js2-refactor]]
 + [[https://github.com/mojochao/npm-mode][npm-mode]]
 + [[https://github.com/abicky/nodejs-repl.el][nodejs-repl]]
@@ -55,6 +57,17 @@ brew install node
 #+BEGIN_SRC sh :dir /sudo:: :tangle (if (doom-system-os 'arch) "yes")
 sudo pacman --needed --noconfirm -S nodejs npm
 #+END_SRC
+
+** openSUSE
+#+BEGIN_SRC sh :dir /sudo::
+sudo zypper install nodejs npm
+#+END_SRC
+
+* Troubleshooting
+** ~tide-sort-completions-by-kind~ isn't respected
+The =:completion company= module uses =company-prescient= to sort completion by
+[[https://developer.mozilla.org/en-US/docs/Mozilla/Tech/Places/Frecency_algorithm][frecency]], which overrules specialized sorting provided by some company backends
+(like ~company-tide~).
 
 * Appendix
 ** Commands
