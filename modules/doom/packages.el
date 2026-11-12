@@ -3,7 +3,7 @@
 ;; doom.el
 (package! compat
   :recipe (:host github :repo "emacs-compat/compat")
-  :pin "b5b48183689b536f72b1214106afeabc465da9d4")  ; 31.0.0.1
+  :pin "90880f81419577e1d3f68424d2a3adf31e6d663e")  ; 31.1.0.0
 (unless (fboundp 'igc-info)
   (package! gcmh
     :pin "0089f9c3a6d4e9a310d0791cf6fa8f35642ecfd9"))
@@ -16,13 +16,13 @@
             :branch "develop"
             :local-repo "straight.el"
             :files ("straight*.el"))
-  :pin "e40a5b7f8b0c1bb2cde0e7e477b5f81303e34b95")
+  :pin "1a6b4b29815ffa95d3545f65d32e5b3820e4e563")
 
 ;; doom-ui.el
-(package! nerd-icons :pin "d7742c5e8fba5d601633dd46f4cd7b34928f1185")
+(package! nerd-icons :pin "17faac7977242b470732efd417d3bcc8eb5a830e")
 
 ;; doom-projects.el
-(package! project :pin "883c035af5b66550a1692b89bb11a9daead62d61")
+(package! project :pin "ffb38d7798d86c7fa6623db0f64b461abb6572c2")
 
 ;; doom-keybinds.el
 (package! which-key

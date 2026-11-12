@@ -39,17 +39,17 @@
 ;;   > $EMACSDIR/early-init.el
 ;;     > $EMACSDIR/lisp/doom.el
 ;;       - $EMACSDIR/lisp/doom-lib.el
-;;       - hook: `doom-before-init-hook'
-;;       - $EMACSDIR/lisp/doom-emacs.el
 ;;       - $DOOMDIR/init.el
+;;       - hook: `doom-before-init-hook'
+;;   - $EMACSDIR/user-lisp/.user-lisp-autoloads.el  (see `user-lisp-directory')
 ;;   - hook: `before-init-hook'
 ;;   > $XDG_DATA_HOME/doom/$PROFILE/@/$VERSION/init.el   (replaces $EMACSDIR/init.el)
-;;     - $EMACSDIR/doom-{keybinds,ui,projects,editor}.el
+;;     - $EMACSDIR/doom-emacs.el
 ;;     - hook: `doom-before-modules-init-hook'
-;;     - {$DOOMDIR,$EMACSDIR}/modules/*/*/init.el
+;;     - {$DOOMDIR,$EMACSDIR}/{,sources/*/}modules/*/*/init.el
 ;;     - hook: `doom-after-modules-init-hook'
 ;;     - hook: `doom-before-modules-config-hook'
-;;     - {$DOOMDIR,$EMACSDIR}/modules/*/*/config.el
+;;     - {$DOOMDIR,$EMACSDIR}/{,sources/*/}modules/*/*/config.el
 ;;     - hook: `doom-after-modules-config-hook'
 ;;     - $DOOMDIR/config.el
 ;;     - `custom-file' or $DOOMDIR/custom.el
@@ -70,37 +70,19 @@
 
 (eval-and-compile
   (add-to-list 'load-path
-               (file-name-directory (or (bound-and-true-p byte-compile-current-file)
-                                        load-file-name)))
-
-  ;; Doom core will support Emacs 27.1+ for a *long* time, but the official
-  ;; module libraries require 29.1+. Also keep in mind that certain modules may
-  ;; have stricter requirements (e.g. tree-sitter needs 29.1+).
-  (when (< emacs-major-version 27)
-    (user-error
-     (concat
-      "Detected Emacs " emacs-version ", but Doom requires 27.1 or newer (30.2 is\n\n"
-      "recommended). The current Emacs executable in use is:\n\n  " (car command-line-args)
-      "\n\nA guide for installing a newer version of Emacs can be found at:\n\n  "
-      (format "https://docs.doomemacs.org/-/install/%s"
-              (cond ((eq system-type 'darwin) "on-macos")
-                    ((memq system-type '(cygwin windows-nt ms-dos)) "on-windows")
-                    ("on-linux")))
-      "\n\n"
-      (if noninteractive
-          (concat "Alternatively, either update your $PATH environment variable to include the\n"
-                  "path of the desired Emacs executable OR alter the $EMACS environment variable\n"
-                  "to specify the exact path or command needed to invoke Emacs."
-                  (when-let* ((script (cadr (member "--load" command-line-args)))
-                              (command (file-name-nondirectory script)))
-                    (concat " For example:\n\n"
-                            "  $ EMACS=/path/to/valid/emacs " command " ...\n"
-                            "  $ EMACS=\"/Applications/Emacs.app/Contents/MacOS/Emacs\" " command " ...\n"
-                            "  $ EMACS=\"snap run emacs\" " command " ..."))
-                  "\n\nAborting...")
-        (concat "If you believe this error is a mistake, run 'doom doctor' on the command line\n"
-                "to diagnose common issues with your config and system.")))))
+               (file-name-directory
+                (or (bound-and-true-p byte-compile-current-file)
+                    load-file-name)))
   nil)
+
+;; Doom's CLI supports Emacs 27.1+ for the long haul, but lisp/doom-emacs.el and
+;; module libraries require 29.1+.
+(let ((supported (if noninteractive 27 29)))
+  (when (< emacs-major-version supported)
+    (user-error "Detected Emacs %s, but %sinteractive Doom needs >=%d.1"
+                emacs-version
+                (if noninteractive "non-" "")
+                supported)))
 
 
 ;;
@@ -163,9 +145,6 @@ The first element should always be one of `macos', `windows', `linux', or
   "A development framework for Emacs configurations and Emacs Lisp projects."
   :link '(url-link :tag "Website" "https://doomemacs.org")
   :group 'emacs)
-
-(defconst doom-version "2.2.2"
-  "Current version of Doom Emacs core.")
 
 (defvar doom-init-time nil
   "The time it took, in seconds (as a float), for Doom Emacs to start up.")
@@ -358,6 +337,16 @@ Each function is passed one argument: the doom-profile being started up."
 ;;
 ;;; * Initializers
 
+(defun doom-version ()
+  "Return the running version of Doom core."
+  (declare (side-effect-free t))
+  (or (get 'doom 'version)
+      (put 'doom 'version
+           (with-temp-buffer
+             (insert-file-contents (file-name-concat doom-emacs-dir ".doom")
+                                   nil 0 96)
+             (read (current-buffer))))))
+
 (defun doom-initialize (profile-id &optional interactive?)
   "Bootstrap the Doom session ahead."
   (when (and (not doom-profile)
@@ -439,7 +428,7 @@ Each function is passed one argument: the doom-profile being started up."
                (message "Error loading profile: %s" (error-message-string e))
                (message "Run 'doom sync' to regenerate it!"))))
         (if interactive?
-            (signal 'doom-nosync-error '(doom-initialize ,profile-id))))
+            (signal 'doom-nosync-error `(doom-initialize ,profile-id))))
       (unless doom-profile
         (setq doom-profile
               (make-doom-profile :name (car key)
@@ -481,8 +470,9 @@ safely cleaned up with \\='doom sync' or \\='doom gc'."
         (let ((temporary-file-directory (doom-profile-cache-dir t "comp/")))
           (make-directory temporary-file-directory t)
           (apply fn args)))
-      ;; This is renamed in newer versions of Emacs.
-      (advice-add #'comp--run-async-workers :around #'comp-run-async-workers@dont-litter-tmpdir)
+      (when (fboundp 'comp--run-async-workers)
+        ;; This is renamed in newer versions of Emacs.
+        (advice-add #'comp--run-async-workers :around #'comp-run-async-workers@dont-litter-tmpdir))
 
       (with-eval-after-load 'comp
         ;; HACK: On Emacs 30.0.92, `native-comp-jit-compilation-deny-list' was

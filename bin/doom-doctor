@@ -56,23 +56,19 @@ in."
 
   (print! (start "Checking your Emacs version..."))
   (print-group!
-    (when (or (> emacs-major-version 30)
-              (string-match-p ".\\([56]0\\|9[0-9]\\)$" emacs-version))
-      (warn! "Detected a development build of Emacs (%s)" emacs-version)
-      (if (> emacs-major-version 30)
-          (explain! "This is the bleeding edge of Emacs and is inherently unstable.\n")
-        (explain! "A version that ends in .50, .60, or .9X indicates a pre-release build of Emacs "
-                  "in between stable releases. Doom does not officially support them.\n"))
-      (explain! "If you encounter issues, make extra sure that your issue is reproducible on "
-                "a stable version of Emacs (between 27.1–30.2) before reporting them to Doom's "
-                "issue tracker! Check out the \"Why does Doom not support Emacs HEAD\" QnA "
-                "in Doom's FAQ for common issues and debugging."))
+    (when (nth 2 (version-to-list emacs-version))
+      (warn! "Detected a development/pre-release build of Emacs (%s)" emacs-version)
+      (explain! "Any version with more than 2 components in their version string (e.g. ending "
+                "in X.X.50, X.X.60, or X.X.9X) indicates a pre-release or bleeding-edge build "
+                "of Emacs. They may be unstable and Doom does not officially support them.\n\n"
+                "If you encounter issues, please make sure that your issue is reproducible on "
+                "a stable version of Emacs before reporting them!"))
 
-    (when (and (version= emacs-version "29.4") (featurep 'pgtk))
-      (warn! "Detected emacs-pgtk 29.4!")
-      (explain! "If you are experiencing segfaults (crashes), consider downgrading to 29.3 or "
-                "upgrading to 30.2+. A known bug in 29.4 causes intermittent crashes. "
-                "See doomemacs#7915 for details.")))
+      (when (and (version= emacs-version "29.4") (featurep 'pgtk))
+        (warn! "Detected emacs-pgtk 29.4!")
+        (explain! "If you are experiencing segfaults (crashes), consider downgrading to 29.3 or "
+                  "upgrading to 30.1+. A known bug in 29.4 causes intermittent crashes. "
+                  "See doomemacs/core#7915 for details.")))
 
   (print! (start "Checking for Doom's prerequisites..."))
   (print-group!
@@ -225,13 +221,25 @@ in."
         (doom-startup)
         (require 'straight)
 
-        (print! (success "Initialized Doom Emacs %s") doom-version)
+        (print! (success "Initialized Doom Emacs %s") (doom-version))
         (print!
          (if (hash-table-p doom-modules)
              (success "Detected %d modules" (hash-table-count doom-modules))
            (warn "Failed to load any modules. Do you have an private init.el?")))
 
         (print! (success "Detected %d packages") (length doom-packages))
+
+        (let ((envvar-file (doom-profile-dir t doom-profile-init-dir-name "05-doom-env.load.el")))
+          (when (and (file-exists-p envvar-file)
+                     (let ((normalize (lambda (dirs) (mapcar #'directory-file-name (remq nil dirs)))))
+                       (not (equal (funcall normalize (get 'exec-path 'initial-value))
+                                   (let (process-environment exec-path shell-file-name)
+                                     (load envvar-file t t)
+                                     (funcall normalize exec-path))))))
+            (warn! "Your $PATH has changed since you last generated your envvar file!")
+            (explain! "Run `doom sync' to regenerate your envvar file. Or run `doom sync -r' to only "
+                      "regenerate your profile files without syncing your modules/packages/etc (much "
+                      "faster). See `doom help env` for more information about envvar files.")))
 
         (print! (start "Checking Doom core for irregularities..."))
         (print-group!
@@ -284,7 +292,7 @@ in."
             (explain! "Doom will only load one of these (~/.config/doom takes precedence). Possessing\n"
                       "both is rarely intentional; you should one or the other."))
 
-          (unless (string-match-p "/\\(ba\\|z\\|m?k\\|d?a\\)?sh$" shell-file-name)
+          (unless (string-match-p "/\\(ba\\|\\(fi\\)?z\\|m?k\\|d?a\\)?sh$" shell-file-name)
             (print! (warn "Detected a non-POSIX compliant shell (%s)" shell-file-name))
             (explain! "Non-POSIX compliant shells (particularly Fish and Nushell) can cause "
                       "unpredictable issues with any Emacs utilities that spawn child processes "

@@ -119,12 +119,13 @@ Hide the mode line if it is shown, and show it if it's hidden."
 (defcustom doom-theme nil
   "What theme (or themes) to load at startup.
 
-Is either a symbol representing the name of an Emacs theme, or a list thereof
-(to enable in order).
+Is either a symbol representing the name of an Emacs theme, or a cons cell in
+the format of (DARK-THEME . LIGHT-THEME). At startup, Doom tries to determine if
+the system is in dark mode (see `doom--dark-mode-p' for its methods).
 
-Set to `nil' to load no theme at all. This variable is changed by `load-theme'
-and `enable-theme'."
-  :type '(choice symbol (repeat symbol))
+Set to nil to load no theme at all. This variable is changed by `load-theme' and
+`enable-theme'."
+  :type '(choice symbol (cons symbol symbol))
   :group 'doom)
 
 (defcustom doom-font nil
@@ -278,16 +279,11 @@ multiple frames focused at once)."
       (cons 'custom-theme-directory
             (delq 'custom-theme-directory custom-theme-load-path)))
 
-;; If a packages doesn't use `user-emacs-directory' or `locate-user-emacs-file'
-;; to set their file/dir variables, then we need to set them ourselves to avoid
-;; littering in ~/.emacs.d/.
-(setq desktop-dirname  (doom-profile-state-dir t "desktop")
-      pcache-directory (doom-profile-cache-dir t "pcache/"))
-
 ;; Write custom.el settings to $DOOMDIR/custom.el instead of $EMACSDIR/init.el,
 ;; allowing users to version control them and not interfere with Doom init.
 (setq custom-file (doom-user-dir "custom.el"))
 
+;; REVIEW: Fix this upstream
 (define-advice en/disable-command (:around (fn &rest args) write-to-data-dir)
   "Save safe-local-variables to `custom-file' instead of `user-init-file'.
 
@@ -296,56 +292,37 @@ Otherwise, `en/disable-command' (in novice.el.gz) is hardcoded to write them to
   (let ((user-init-file custom-file))
     (apply fn args)))
 
-;; Ensure that, if the user does want package.el, it is configured correctly.
-;; You really shouldn't be using it, though...
-(with-eval-after-load 'package
-  (setq package-user-dir (file-name-concat doom-local-dir "elpa/")
-        package-gnupghome-dir (expand-file-name "gpg" package-user-dir))
-  (let ((s (if (gnutls-available-p) "s" "")))
-    ;; I omit Marmalade because its packages are manually submitted rather than
-    ;; pulled, and so often out of date.
-    (add-to-list 'package-archives `("melpa" . ,(format "http%s://melpa.org/packages/" s)))
-    (add-to-list 'package-archives `("org"   . ,(format "http%s://orgmode.org/elpa/"   s))))
-  ;; Refresh package.el the first time you call `package-install', so it's still
-  ;; trivially usable. Remember to run 'doom sync' to purge them; they can
-  ;; conflict with packages installed via straight!
-  (add-transient-hook! 'package-install (package-refresh-contents)))
-
 
 ;;
 ;;; * Global defaults
-
-;; Background native compilation consumes several CPU cores and takes minutes to
-;; complete. Not worth the extra stress when on battery power.
-(setq native-comp-async-on-battery-power nil)  ; introduced in Emacs 31.1
-
 
 ;;; ** Stricter security defaults
 
 ;; Emacs is essentially one huge security vulnerability, what with all the
 ;; dependencies it pulls in from all corners of the globe. Let's try to be a
 ;; *little* more discerning.
-(setq gnutls-verify-error noninteractive
-      gnutls-algorithm-priority
-      (when (boundp 'libgnutls-version)
-        (concat "SECURE128:+SECURE192:-VERS-ALL"
-                (if (and (not doom--system-windows-p)
-                         (>= libgnutls-version 30605))
-                    ":+VERS-TLS1.3")
-                ":+VERS-TLS1.2"))
-      ;; `gnutls-min-prime-bits' is set based on recommendations from
-      ;; https://www.keylength.com/en/4/
-      gnutls-min-prime-bits 3072
-      tls-checktrust gnutls-verify-error
-      ;; Emacs is built with gnutls.el by default, so `tls-program' won't
-      ;; typically be used, but in the odd case that it does, we ensure a more
-      ;; secure default for it (falling back to `openssl' if absolutely
-      ;; necessary). See https://redd.it/8sykl1 for details.
-      tls-program '("openssl s_client -connect %h:%p -CAfile %t -nbio -no_ssl3 -no_tls1 -no_tls1_1 -ign_eof"
-                    "gnutls-cli -p %p --dh-bits=3072 --ocsp --x509cafile=%t \
+(with-no-warnings
+  (setq gnutls-verify-error noninteractive
+        gnutls-algorithm-priority
+        (when (boundp 'libgnutls-version)
+          (concat "SECURE128:+SECURE192:-VERS-ALL"
+                  (if (and (not doom--system-windows-p)
+                           (>= libgnutls-version 30605))
+                      ":+VERS-TLS1.3")
+                  ":+VERS-TLS1.2"))
+        ;; `gnutls-min-prime-bits' is set based on recommendations from
+        ;; https://www.keylength.com/en/4/
+        gnutls-min-prime-bits 3072
+        tls-checktrust gnutls-verify-error
+        ;; Emacs is built with gnutls.el by default, so `tls-program' won't
+        ;; typically be used, but in the odd case that it does, we ensure a more
+        ;; secure default for it (falling back to `openssl' if absolutely
+        ;; necessary). See https://redd.it/8sykl1 for details.
+        tls-program '("openssl s_client -connect %h:%p -CAfile %t -nbio -no_ssl3 -no_tls1 -no_tls1_1 -ign_eof"
+                      "gnutls-cli -p %p --dh-bits=3072 --ocsp --x509cafile=%t \
 --strict-tofu --priority='SECURE192:+SECURE128:-VERS-ALL:+VERS-TLS1.2:+VERS-TLS1.3' %h"
-                    ;; compatibility fallbacks
-                    "gnutls-cli -p %p %h"))
+                      ;; compatibility fallbacks
+                      "gnutls-cli -p %p %h")))
 
 ;; DEPRECATED: Interactive sessions won't be able to interact with Straight
 ;;   (or Elpaca) in the future, so this is temporary.
@@ -402,8 +379,8 @@ Otherwise, `en/disable-command' (in novice.el.gz) is hardcoded to write them to
 ;; Trust the contents of $EMACSDIR and $DOOMDIR, because the user will likely be
 ;; working with either/both.
 (when (boundp 'trusted-content)
-  (add-to-list 'trusted-content (file-truename doom-emacs-dir))
-  (add-to-list 'trusted-content (file-truename doom-user-dir)))
+  (add-to-list 'trusted-content (abbreviate-file-name (file-truename doom-emacs-dir)))
+  (add-to-list 'trusted-content (abbreviate-file-name (file-truename doom-user-dir))))
 
 ;; Ensure .dir-locals.el in $EMACSDIR and $DOOMDIR are always respected
 (add-to-list 'safe-local-variable-directories doom-emacs-dir)
@@ -515,20 +492,20 @@ or file path may exist now."
              (set-auto-mode)
              (not (eq major-mode 'fundamental-mode)))))))
 
-(defadvice! doom--shut-up-autosave-a (fn &rest args)
-  "If a file has autosaved data, `after-find-file' will pause for 1 second to
-tell you about it. Very annoying. This prevents that."
-  :around #'after-find-file
+(define-advice after-find-file (:around (fn &rest args) suppress-sit-for)
+  "Inhibit `sit-for' calls in FN.
+
+If a file has autosaved data, `after-find-file' pauses for a second to tell you
+about it. Very annoying. This prevents that."
   (letf! ((#'sit-for #'ignore))
     (apply fn args)))
 
-;; HACK: Make sure backup files (like undo-tree's) don't have ridiculously long
-;;   file names that some filesystems will refuse.
 ;; REVIEW: PR this upstream, like they have with the UNIQUIFY argument in
 ;;   `auto-save-file-name-transforms' entries.
-(defadvice! doom-make-hashed-backup-file-name-a (fn file)
-  "A few places use the backup file name so paths don't get too long."
-  :around #'make-backup-file-name-1
+(define-advice make-backup-file-name-1 (:around (fn file) hash-long-paths)
+  "Hash backup file names so they don't get too long for some filesystems.
+
+A few places use the backup file name so paths don't get too long."
   (let ((alist backup-directory-alist)
         backup-directory)
     (while alist
@@ -805,20 +782,21 @@ tell you about it. Very annoying. This prevents that."
 ;;
 ;;; * Keybind config
 
-(cond
- (doom--system-macos-p
-  ;; mac-* variables are used by the special emacs-mac build of Emacs by
-  ;; Yamamoto Mitsuharu, while other builds use ns-*.
-  (setq mac-command-modifier      'super
-        ns-command-modifier       'super
-        mac-option-modifier       'meta
-        ns-option-modifier        'meta
-        ;; Free up the right option for character composition
-        mac-right-option-modifier 'none
-        ns-right-option-modifier  'none))
- (doom--system-windows-p
-  (setq w32-lwindow-modifier 'super
-        w32-rwindow-modifier 'super)))
+(with-no-warnings  ; silence warnings about undefined vars
+  (cond
+   (doom--system-macos-p
+    ;; mac-* variables are used by the special emacs-mac build of Emacs by
+    ;; Yamamoto Mitsuharu, while other builds use ns-*.
+    (setq mac-command-modifier      'super
+          ns-command-modifier       'super
+          mac-option-modifier       'meta
+          ns-option-modifier        'meta
+          ;; Free up the right option for character composition
+          mac-right-option-modifier 'none
+          ns-right-option-modifier  'none))
+   (doom--system-windows-p
+    (setq w32-lwindow-modifier 'super
+          w32-rwindow-modifier 'super))))
 
 ;; HACK: Emacs can't distinguish C-i from TAB, or C-m from RET, in either GUI or
 ;;   TTY frames. This is a byproduct of its history with the terminal, which
@@ -977,43 +955,43 @@ If NOW is non-nil, PACKAGES will be marked for incremental loading next time
 Emacs is idle for `doom-incremental-first-idle-timer' seconds (falls back to
 `doom-incremental-idle-timer'), then in `doom-incremental-idle-timer' intervals
 afterwards."
-  (let* ((gc-cons-threshold most-positive-fixnum)
-         (first-idle-timer (or doom-incremental-first-idle-timer
-                               doom-incremental-idle-timer)))
-    (if (not now)
-        (cl-callf append doom-incremental-packages packages)
-      (while packages
-        (let ((req (pop packages))
-              idle-time)
-          (if (featurep req)
-              (doom-log 2 "start:iloader: Already loaded %s (%d left)" req (length packages))
-            (condition-case-unless-debug e
-                (and
-                 (or (null (setq idle-time (current-idle-time)))
-                     (< (float-time idle-time) first-idle-timer)
-                     (not
-                      (while-no-input
-                        (doom-log 2 "start:iloader: Loading %s (%d left)" req (length packages))
-                        ;; If `default-directory' doesn't exist or is
-                        ;; unreadable, Emacs throws file errors.
-                        (let ((default-directory doom-emacs-dir)
-                              (inhibit-message t)
-                              (file-name-handler-alist
-                               (list (rassq 'jka-compr-handler file-name-handler-alist))))
-                          (require req nil t)
-                          t))))
-                 (push req packages))
-              (error
-               (message "Error: failed to incrementally load %S because: %s" req e)
-               (setq packages nil)))
-            (if (null packages)
-                (doom-log 2 "start:iloader: Finished!")
-              (run-at-time (if idle-time
-                               doom-incremental-idle-timer
-                             first-idle-timer)
-                           nil #'doom-load-packages-incrementally
-                           packages t)
-              (setq packages nil))))))))
+  (with-delayed-gc!
+    (let ((first-idle-timer (or doom-incremental-first-idle-timer
+                                doom-incremental-idle-timer)))
+      (if (not now)
+          (cl-callf append doom-incremental-packages packages)
+        (while packages
+          (let ((req (pop packages))
+                idle-time)
+            (if (featurep req)
+                (doom-log 2 "start:iloader: Already loaded %s (%d left)" req (length packages))
+              (condition-case-unless-debug e
+                  (and
+                   (or (null (setq idle-time (current-idle-time)))
+                       (< (float-time idle-time) first-idle-timer)
+                       (not
+                        (while-no-input
+                          (doom-log 2 "start:iloader: Loading %s (%d left)" req (length packages))
+                          ;; If `default-directory' doesn't exist or is
+                          ;; unreadable, Emacs throws file errors.
+                          (let ((default-directory doom-emacs-dir)
+                                (inhibit-message t)
+                                (file-name-handler-alist
+                                 (list (rassq 'jka-compr-handler file-name-handler-alist))))
+                            (require req nil t)
+                            t))))
+                   (push req packages))
+                (error
+                 (message "Error: failed to incrementally load %S because: %s" req e)
+                 (setq packages nil)))
+              (if (null packages)
+                  (doom-log 2 "start:iloader: Finished!")
+                (run-at-time (if idle-time
+                                 doom-incremental-idle-timer
+                               first-idle-timer)
+                             nil #'doom-load-packages-incrementally
+                             packages t)
+                (setq packages nil)))))))))
 
 (defun doom-load-packages-incrementally-h ()
   "Begin incrementally loading packages in `doom-incremental-packages'.
@@ -1033,16 +1011,16 @@ If this is a daemon session, load them all immediately instead."
 
 (defun doom-run-switch-buffer-hooks-h (&optional _)
   "Trigger `doom-switch-buffer-hook' when selecting a new buffer."
-  (let ((gc-cons-threshold most-positive-fixnum))
-    (run-hooks 'doom-switch-buffer-hook)))
+  (unless (or (minibufferp)
+              (eq (window-old-buffer) (current-buffer)))
+    (with-delayed-gc! (run-hooks 'doom-switch-buffer-hook))))
 
 (defun doom-run-switch-window-hooks-h (&optional _)
   "Trigger `doom-switch-window-hook' when selecting a window in the same frame."
   (unless (or (minibufferp)
               (not (equal (old-selected-frame) (selected-frame)))
               (equal (old-selected-window) (minibuffer-window)))
-    (let ((gc-cons-threshold most-positive-fixnum))
-      (run-hooks 'doom-switch-window-hook))))
+    (with-delayed-gc! (run-hooks 'doom-switch-window-hook))))
 
 (defvar doom-switch-frame-hook-debounce-delay 2.0
   "The delay for which `doom-switch-frame-hook' won't trigger again.
@@ -1054,7 +1032,7 @@ the frame through some other means.")
 
 (defun doom--run-switch-frame-hooks-fn (_)
   (remove-hook 'pre-redisplay-functions #'doom--run-switch-frame-hooks-fn)
-  (let ((gc-cons-threshold most-positive-fixnum))
+  (with-delayed-gc!
     (dolist (fr (visible-frame-list))
       (let ((state (frame-focus-state fr)))
         (when (and state (not (eq state 'unknown)))
@@ -1084,14 +1062,13 @@ the frame through some other means.")
 
 ;;; ** kill-current-buffer advice
 
-(defadvice! doom--switch-to-fallback-buffer-maybe-a (&rest _)
+(define-advice kill-current-buffer (:before-until (&rest _) to-fallback-buffer)
   "Switch to `doom-fallback-buffer' if on last real buffer.
 
 Advice for `kill-current-buffer'. If in a dedicated window, delete it. If there
 are no real buffers left OR if all remaining buffers are visible in other
 windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
 `kill-current-buffer'."
-  :before-until #'kill-current-buffer
   (let ((buf (current-buffer)))
     (cond ((eq buf (doom-fallback-buffer))
            (message "Can't kill the fallback buffer.")
@@ -1191,20 +1168,56 @@ windows, switch to `doom-fallback-buffer'. Otherwise, delegate to original
     (run-hooks 'after-setting-font-hook))
   (put 'doom-font 'initialized t))
 
+(defun doom--dark-mode-p ()
+  "Return non-nil if the OS is in dark-mode."
+  (cond ((featurep :system 'macos)
+         (if (boundp 'ns-system-appearance)
+             (eq ns-system-appearance 'dark)
+           (let ((cmd "tell app \"System Events\" to tell appearance preferences to return (dark mode as text)")
+                 (true "true")
+                 (gui? (display-graphic-p)))
+             (string-equal
+              (cond ((and gui? (fboundp 'mac-do-applescript))
+                     (setq true "\"true\"")
+                     (ignore-errors (mac-do-applescript cmd)))
+                    ((and gui? (fboundp 'ns-do-applescript))
+                     (ignore-errors (ns-do-applescript cmd)))
+                    ((string-trim (shell-command-to-string
+                                   (format "osascript -e '%s'" cmd)))))
+              true))))
+        ((fboundp 'w32-read-registry)
+         (eq 0 (w32-read-registry
+                'HKCU
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+                "AppsUseLightTheme")))
+        ((and (featurep :system 'linux)
+              (require 'dbus nil t))
+         (eq 1 (car-safe (flatten-list
+                          (dbus-call-method
+                           :session "org.freedesktop.portal.Desktop"
+                           "/org/freedesktop/portal/desktop"
+                           "org.freedesktop.portal.Settings" "Read"
+                           "org.freedesktop.appearance" "color-scheme")))))
+        ((doom-log 1 "Failed to determine if system is in dark mode")
+         nil)))
+
 (defun doom-init-theme-h (&rest _)
   "Load the theme specified by `doom-theme' in FRAME."
-  (dolist (th (ensure-list doom-theme))
+  (when-let* ((th (if (consp doom-theme)
+                      (if (doom--dark-mode-p)
+                          (car doom-theme)
+                        (cdr doom-theme))
+                    doom-theme)))
     (unless (custom-theme-enabled-p th)
       (if (custom-theme-p th)
           (enable-theme th)
         (load-theme th t)))))
 
-(defadvice! doom--detect-colorscheme-a (theme)
+(define-advice provide-theme (:after (theme) detect-color-scheme)
   "Add :kind \\='color-scheme to THEME if it doesn't already have one.
 
 Themes wouldn't call `provide-theme' unless they were a color-scheme, so treat
 them as such. Also intended as a helper for `doom--theme-is-colorscheme-p'."
-  :after #'provide-theme
   (or (plist-get (get theme 'theme-properties) :kind)
       (cl-callf plist-put (get theme 'theme-properties) :kind
                 'color-scheme)))
@@ -1246,7 +1259,9 @@ them as such. Also intended as a helper for `doom--theme-is-colorscheme-p'."
         ;; HACK: If the user uses `load-theme' in their $DOOMDIR instead of
         ;;   setting `doom-theme', override the latter, because they shouldn't
         ;;   be using both.
-        (unless (memq theme (ensure-list doom-theme))
+        (unless (or (eq doom-theme theme)
+                    (eq doom-theme (car-safe theme))
+                    (eq doom-theme (cdr-safe theme)))
           (setq-default doom-theme theme))))))
 
 (add-hook! 'after-make-frame-functions :depth -90
@@ -1441,6 +1456,14 @@ with `set-indent-vars!'."
 
 ;;;###package bookmark
 (setq bookmark-default-file (doom-profile-data-dir t "bookmarks"))
+(define-advice bookmark-load (:around (fn &rest args) no-find-file-hook)
+  "Suppress `find-file-hook' and mode hooks while loading bookmarks.
+
+`bookmarks-load' shouldn't be using `find-file-noselect' where a
+`insert-file-contents' + `read' would've been enough, and much more performant.
+This advice exists the mitigate first-time load times that this triggers."
+  (dlet (find-file-hook)
+    (delay-mode-hooks (apply fn args))))
 
 
 ;;;###package comint
@@ -1451,8 +1474,7 @@ with `set-indent-vars!'."
   ;;   undo could destroy output while it's being printed or delete buffer
   ;;   contents past the boundaries of the current prompt.
   (add-hook 'comint-exec-hook #'buffer-disable-undo)
-  (defadvice! doom--comint-enable-undo-a (process _string)
-    :after #'comint-output-filter
+  (define-advice comint-output-filter (:after (process _string) disable-undo)
     (unless buffer-read-only  ; don't affect output-only buffers like `compilation-mode'
       (with-current-buffer (process-buffer process)
         (when-let* ((start-marker comint-last-output-start))
@@ -1466,14 +1488,14 @@ with `set-indent-vars!'."
   ;; Protect prompts from accidental modifications.
   (setq-default comint-prompt-read-only t)
 
-  ;; UX: Prior output in shell and comint shells (like ielm) should be
-  ;;   read-only. Otherwise, it's trivial to make edits in visual modes (like
-  ;;   evil's or term's term-line-mode) and leave the buffer in a half-broken
-  ;;   state (which you have to flush out with a couple RETs, which may execute
-  ;;   the broken text in the buffer),
-  (defadvice! doom--comint-protect-output-in-visual-modes-a (process _string)
-    :after #'comint-output-filter
-    ;; Adapted from https://github.com/michalrus/dotfiles/blob/c4421e361400c4184ea90a021254766372a1f301/.emacs.d/init.d/040-terminal.el.symlink#L33-L49
+  ;; Adapted from michalrus/dotfiles (no longer exists)
+  (define-advice comint-output-filter (:after (process _string) protect-output)
+    "Mark prior output as read-only to prevent breakage caused by edits.
+
+Prior output in shell and comint shells (like ielm) should be read-only.
+Otherwise, it's trivial to make edits in visual modes (like evil's or term's
+term-line-mode) and leave the buffer in a half-broken state (which you have to
+flush out with a couple RETs, which may execute the broken text in the buffer)."
     (with-current-buffer (process-buffer process)
       (let ((start-marker comint-last-output-start)
             (end-marker (process-mark process)))
@@ -1528,10 +1550,13 @@ with `set-indent-vars!'."
              ;;   expensive in longer buffers, especially in
              ;;   `compilation-filter-hook' which fires rapidly.
              (* 80 comint-buffer-maximum-size))
-          (let ((gc-cons-threshold most-positive-fixnum)
-                (gc-cons-percentage 1.0))
+          (with-delayed-gc!
             (with-silent-modifications
               (comint-truncate-buffer)))))))
+
+
+;;;###package desktop
+(setq desktop-dirname (doom-profile-state-dir t "desktop"))
 
 
 ;;;###package ediff
@@ -1579,8 +1604,10 @@ with `set-indent-vars!'."
                            cursor-face-highlight-mode
                            (doom-temp-buffer-p b)
                            (minibufferp)))))
-              ;; Don't display line highlights in non-focused windows, for
-              ;; performance sake and to reduce UI clutter.
+              ;; Per-window line highlights is more performant than other
+              ;; settings for `global-hl-line-sticky-flag', because it uses
+              ;; `pre-redisplay-functions' and per-window overlays instead of
+              ;; `post-command-hook' and per-buffer overlays.
               global-hl-line-sticky-flag 'window)
       ;; HACK: `global-hl-line-buffers' wasn't introduced until 31.1, so I
       ;;   reimplement it for `global-hl-line-modes', so we have a major mode
@@ -1614,6 +1641,23 @@ with `set-indent-vars!'."
     (defun doom-truly-disable-hl-line-h ()
       (unless hl-line-mode
         (kill-local-variable 'doom--hl-line-mode)))))
+
+
+;;;###package package
+;; Sure, Doom doesn't use package.el (nor recommend it), but if the user wants
+;; to, let's ensure it is configured correctly for them.
+(with-eval-after-load 'package
+  (setq package-user-dir (file-name-concat doom-local-dir "elpa/")
+        package-gnupghome-dir (expand-file-name "gpg" package-user-dir))
+  (let ((s (if (gnutls-available-p) "s" "")))
+    ;; I omit Marmalade because its packages are manually submitted rather than
+    ;; pulled, and so often out of date.
+    (add-to-list 'package-archives `("melpa" . ,(format "http%s://melpa.org/packages/" s)))
+    (add-to-list 'package-archives `("org"   . ,(format "http%s://orgmode.org/elpa/"   s))))
+  ;; Refresh package.el the first time you call `package-install', so it's still
+  ;; trivially usable. Remember to run 'doom sync' to purge them; they can
+  ;; conflict with packages installed via straight!
+  (add-transient-hook! 'package-install (package-refresh-contents)))
 
 
 ;;;###package paren
@@ -1654,17 +1698,15 @@ with `set-indent-vars!'."
 
   ;; PERF: Text properties inflate the size of recentf's files, and there is no
   ;;   reason to persist them (must be first in `recentf-filename-handlers'!)
-  (add-to-list 'recentf-filename-handlers #'substring-no-properties)
+  ;; DEPRECATED: Remove when 30.x support is dropped
+  ;;   (see emacs-mirror/emacs@6b901a8e8598)
+  (when (< emacs-major-version 31)
+    (add-to-list 'recentf-filename-handlers #'substring-no-properties))
 
   ;; UX: Reorder the recent files list by frecency (i.e. every time you touch a
   ;;   buffer, bump it to the top of the list).
-  (add-hook! '(doom-switch-window-hook write-file-functions)
-    (defun doom--recentf-touch-buffer-h ()
-      "Bump file in recent file list when it is switched or written to."
-      (when buffer-file-name
-        (recentf-add-file buffer-file-name))
-      ;; Return nil for `write-file-functions'
-      nil))
+  (add-hook! '(doom-switch-buffer-hook doom-switch-window-hook)
+             #'recentf-track-opened-file)
   (add-hook! 'dired-mode-hook
     (defun doom--recentf-add-dired-directory-h ()
       "Add dired directories to recentf file list."
@@ -1696,19 +1738,26 @@ with `set-indent-vars!'."
         savehist-additional-variables
         '(kill-ring                        ; persist clipboard
           register-alist                   ; persist macros
-          mark-ring global-mark-ring       ; persist marks
           search-ring regexp-search-ring)) ; persist searches
   (add-hook! 'savehist-save-hook
     (defun doom-savehist-unpropertize-variables-h ()
-      "Remove text properties from `kill-ring' to reduce savehist cache size."
-      (setq kill-ring
-            (mapcar #'substring-no-properties
-                    (cl-remove-if-not #'stringp kill-ring))
-            register-alist
-            (cl-loop for (reg . item) in register-alist
-                     if (stringp item)
-                     collect (cons reg (substring-no-properties item))
-                     else collect (cons reg item))))
+      "Strip text properties from vars to reduce size and serialization errors."
+      (letf! (defun* strip-properties (tree)
+               (cond ((stringp tree) (substring-no-properties tree))
+                     ((consp tree)
+                      (let* ((head (cons nil nil))
+                             (tail head))
+                        (while (consp tree)
+                          (setcdr tail (list (strip-properties (car tree))))
+                          (setq tail (cdr tail)
+                                tree (cdr tree)))
+                        (if tree (setcdr tail tree))  ; preserve dotted tails
+                        (cdr head)))
+                     (tree)))
+        (dolist (var (append savehist-additional-variables
+                             savehist-minibuffer-history-variables))
+          (when (boundp var)
+            (set var (strip-properties (symbol-value var)))))))
     (defun doom-savehist-remove-unprintable-registers-h ()
       "Remove unwriteable registers (e.g. containing window configurations).
 Otherwise, `savehist' would discard `register-alist' entirely if we don't omit
@@ -1725,31 +1774,30 @@ the unwritable tidbits."
 (setq save-place-file (doom-profile-cache-dir t "saveplace"))
 (add-hook 'doom-first-input-hook #'save-place-mode)
 (with-eval-after-load 'saveplace
-  (defadvice! doom--recenter-on-load-saveplace-a (&rest _)
-    "Recenter on cursor when loading a saved place."
-    :after-while #'save-place-find-file-hook
-    (if buffer-file-name (ignore-errors (recenter))))
+  (add-hook! 'save-place-after-find-file-hook
+    (defun doom-recenter-if-in-file-h ()
+      (if buffer-file-name (ignore-errors (recenter)))))
 
-  (defadvice! doom--inhibit-saveplace-in-long-files-a (fn &rest args)
-    :around #'save-place-to-alist
+  (define-advice save-place-to-alist
+      (:around (fn &rest args) inhibit-in-so-long-minor-mode)
     (unless (bound-and-true-p so-long-minor-mode)
       (apply fn args)))
 
-  (defadvice! doom--inhibit-saveplace-if-point-not-at-bol-a (&rest _)
+  (define-advice save-place-find-file-hook (:before-while (&rest _) only-at-bobp)
     "If something else has moved point, don't try to move it again."
-    :before-while #'save-place-find-file-hook
     (bobp))
 
-  (defadvice! doom--dont-prettify-saveplace-cache-a (fn)
-    "`save-place-alist-to-file' uses `pp' to prettify the contents of its cache.
+  ;;; DEPRECATED: Drop with 30.x support (emacs-mirror/emacs@c270402).
+  (when (< emacs-major-version 31)
+    (define-advice save-place-alist-to-file (:around (fn) use-print1)
+      "`save-place-alist-to-file' uses `pp' to prettify the contents of its cache.
 `pp' can be expensive for longer lists, and there's no reason to prettify cache
 files, so this replace calls to `pp' with the much faster `prin1'."
-    :around #'save-place-alist-to-file
-    (letf! ((#'pp #'prin1)) (funcall fn))))
+      (letf! ((#'pp #'prin1)) (funcall fn)))))
 
 
 ;;;###package so-long
-(when (fboundp 'buffer-line-statistics)  ; only 29+
+(when (fboundp 'buffer-line-statistics)  ; only 28+
   (add-hook 'doom-first-file-hook #'global-so-long-mode)
   (with-eval-after-load 'so-long
     (unless (featurep 'native-compile)
@@ -1759,6 +1807,13 @@ files, so this replace calls to `pp' with the much faster `prin1'."
     ;;   activates if a file is too large or has lines whose width exceed
     ;;   `so-long-threshold' (particularly minified files), and disables
     ;;   non-essential functionality to speed Emacs up.
+    (defvar-local doom--so-long-fns nil)
+
+    (add-to-list 'so-long-action-alist
+                 (list #'doom-so-long-activate "Enable so-long-mode or so-long-minor-mode"
+                       (fn! (funcall (or (car doom--so-long-fns) #'ignore)))
+                       (fn! (funcall (or (cdr doom--so-long-fns) #'ignore)))))
+
     (defun doom-so-long-p ()
       "A `so-long-predicate' to determine if the current buffer is too large.
 
@@ -1771,15 +1826,19 @@ and whether the line count of the buffer exceeds that matching entry in
           (or (doom-temp-buffer-p (current-buffer))
               (doom-special-buffer-p (current-buffer) t))
         (let ((stats (buffer-line-statistics)))
-          (or (> (cadr stats) so-long-threshold)
-              (and buffer-file-name
-                   (when-let* ((maxlines
-                                (assoc-default buffer-file-name doom-file-lines-threshold-alist
-                                               #'string-match-p)))
-                     (> (car stats) maxlines)))))))
-    (setq so-long-predicate #'doom-so-long-p
-          so-long-function #'turn-on-so-long-minor-mode
-          so-long-revert-function #'turn-off-so-long-minor-mode)
+          (cond ((> (cadr stats) so-long-threshold)
+                 (setq doom--so-long-fns
+                       '(so-long-mode . so-long-mode-revert)))
+                ((and buffer-file-name
+                      (when-let* ((maxlines
+                                   (assoc-default buffer-file-name doom-file-lines-threshold-alist
+                                                  #'string-match-p)))
+                        (> (car stats) maxlines)))
+                 (setq doom--so-long-fns
+                       '(so-long-minor-mode . turn-off-so-long-minor-mode)))))))
+
+    (setq so-long-action 'doom-so-long-activate
+          so-long-predicate #'doom-so-long-p)
 
     (add-to-list 'so-long-target-modes 'conf-mode)
     (add-to-list 'so-long-target-modes 'text-mode)

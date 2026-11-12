@@ -222,8 +222,9 @@ the value of the last one, or nil if there are none."
                            (> level doom-log-level)))
         (absolute? (string-prefix-p ":" text)))
     (apply #'message
-           (propertize (concat "* %.06f:%s" (if (not absolute?) ":") text)
+           (propertize (concat "* %d:%.06f:%s" (if (not absolute?) ":") text)
                        'face 'font-lock-doc-face)
+           level
            (float-time (time-subtract (current-time) before-init-time))
            (mapconcat
             (lambda (x) (format "%s" x))
@@ -245,8 +246,7 @@ the value of the last one, or nil if there are none."
                      (setq message (pop args)))
                  2)))
     `(when (and (not doom-inhibit-log)
-                (or (not noninteractive)
-                    (<= ,level doom-log-level)))
+                (<= ,level doom-log-level))
        (doom--log ,level ,message ,@args))))
 
 
@@ -379,7 +379,8 @@ Return non-nil if loading the file succeeds."
                      (doom-module-error  ,@(cdr doom-module-load-path)))
                 if (cl-find-if (lambda (dir) (file-in-directory-p path dir)) dirs)
                 do (signal err (list (file-relative-name path (expand-file-name "../" it))
-                                     e)))))))
+                                     e))
+                finally (signal (car e) (cdr e)))))))
 
 (defun doom-require (feature &optional filename noerror)
   "Like `require', but handles and enhances Doom errors.
@@ -399,7 +400,7 @@ Can also load Doom's subfeatures, e.g. (doom-require \\='doom-lib \\='files)"
 (defun doom-run-hook (hook)
   "Run HOOK (a hook function) with better error handling.
 Meant to be used with `run-hook-wrapped'."
-  (doom-log 3 "hook:%s: run %s" (or doom--hook '*) hook)
+  (doom-log 3 "hook:%s: run %S in %S" (or doom--hook '*) hook (current-buffer))
   (condition-case-unless-debug e
       (funcall hook)
     (error
@@ -444,12 +445,15 @@ TRIGGER-HOOK is a list of quoted hooks and/or sharp-quoted functions."
                            ;; internally). In that case assume this hook was
                            ;; invoked non-interactively.
                            (and (boundp hook)
-                                (symbol-value hook)))
-                       (or (null predicate)
-                           (funcall predicate)))
-              (setq running? t)  ; prevent infinite recursion
-              (doom-run-hooks hook-var)
-              (set hook-var nil))))
+                                (symbol-value hook))))
+              ;; The predicate or hooks could change the active buffer, breaking
+              ;; `after-find-file' (doomemacs/core#8884).
+              (save-current-buffer
+                (when (or (null predicate)
+                          (funcall predicate))
+                  (setq running? t)  ; prevent infinite recursion
+                  (doom-run-hooks hook-var)
+                  (set hook-var nil))))))
       (when (daemonp)
         ;; In a daemon session we don't need all these lazy loading shenanigans.
         ;; Just load everything immediately.
@@ -654,7 +658,7 @@ The def* forms accepted are:
   (setq body (macroexp-progn body))
   (when (memq (car bindings) '(defun defun* defun! defmacro defadvice))
     (setq bindings (list bindings)))
-  (dolist (binding (nreverse bindings) body)
+  (dolist (binding (reverse bindings) body)
     (setq
      body (pcase binding
             (`(defmacro . ,rest) `(cl-macrolet (,rest) ,body))
@@ -674,7 +678,7 @@ The def* forms accepted are:
                  (setq first
                        (list (nth 0 first)
                              (nth 1 first)
-                             (gensym (format "doom-letf-" target)))))
+                             (gensym "doom-letf-"))))
                (let ((sym (intern (format "%s@%s" target (nth 2 first)))))
                  `(progn
                     (define-advice ,target ,first ,@rest)
@@ -748,6 +752,15 @@ Can chain these comparisons by adding more (COMPn Vn) pairs afterwards.
                        <= version-list-<=
                        =  version-list-=
                        /= version-list-=))
+
+(defmacro with-delayed-gc! (&rest body)
+  "Evaluate BODY with GC deferred."
+  (declare (indent defun))
+  (if (featurep 'igc)
+      (macroexp-progn body)
+    `(let ((gc-cons-threshold most-positive-fixnum)
+           (gc-cons-percentage 1.0))
+       ,@body)))
 
 
 ;;; ** Closure factories
@@ -996,7 +1009,7 @@ incompatibilities in the alist format.
                              (if f
                                  (signal 'doom-core-error
                                          `(config missing-version ,path))
-                               (setq v doom-version)))
+                               (setq v (doom-version))))
                            (cons
                             v (doom-config--normalize
                                type v (if (listp f) (eval `(backquote ,f) t)))))
@@ -1104,16 +1117,26 @@ to reverse this and trigger `after!' blocks at a more reasonable time."
     `(progn
        (cl-callf2 delq ',feature features)
        (defadvice! ,advice-fn (&rest _)
+         ,(format (concat "Defers `%s' until on of these functions are called:\n\n"
+                          "%s\n\n"
+                          "Created by `defer-feature!'.")
+                  ',feature ',fns)
          :before ',fns
-         ;; Some plugins (like yasnippet) will invoke a fn early to parse
-         ;; code, which would prematurely trigger this. In those cases, well
-         ;; behaved plugins will use `delay-mode-hooks', which we can check for:
+         ;; Some plugins (like yasnippet) will invoke a fn early to parse code,
+         ;; which would prematurely trigger this. In those cases, well behaved
+         ;; plugins will use `delay-mode-hooks', which we can check for:
          (unless delay-mode-hooks
-           ;; ...Otherwise, announce to the world this package has been loaded,
-           ;; so `after!' handlers can react.
-           (provide ',feature)
-           (dolist (fn ',fns)
-             (advice-remove fn #',advice-fn)))))))
+           (unwind-protect
+               (unless (featurep ',feature)
+                 ;; If anything in `after-load-functions' or `after-load-alist'
+                 ;; changes the current buffer, it could break the function
+                 ;; being advised and cause unexpected errors.
+                 (save-current-buffer
+                   ;; ...Otherwise, announce to the world this package has been
+                   ;; loaded, so `after!' handlers can react.
+                   (provide ',feature)))
+             (dolist (fn ',fns)
+               (advice-remove fn #',advice-fn))))))))
 
 
 ;;; ** Hooks

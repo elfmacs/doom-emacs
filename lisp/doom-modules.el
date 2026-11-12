@@ -213,10 +213,11 @@ properties:
            (cons (doom-module-group key) (doom-module-name key)))
           ((doom-module-context-p key)
            (doom-module-context-key key))
-          ((car-safe key)
-           (if (nlistp (cdr-safe key))
-               key
-             (cons (car key) (cadr key))))
+          ((consp key)
+           (cond ((nlistp (cdr-safe key)) key)
+                 ;; Handle v3 keys
+                 ((> (length key) 2) (cons (cadr key) (caddr key)))
+                 ((cons (car key) (cadr key)))))
           ((signal 'wrong-type-argument
                    `((or doom-module doom-module-context cons) ,key)))))
 
@@ -435,6 +436,149 @@ MODULE-LOAD-PATH can be a list of module tree root directories or `t' (return
 all modules in all known sources, collapsed by precedence)."
     (declare (side-effect-free t))
     (mapcar #'doom-module-locate-path (doom-module-list module-load-path initorder?))))
+
+;;;###autoload
+(defun doom-module-key<-str (str)
+  "Parse a module key string into a module key.
+
+STR is a module key string is in the format \"[source ]:group category[
+[+flags...]]\".
+
+See `doom-module-key' for the format and documentation for module keys."
+  (cons t (mapcar #'intern (split-string str " " t))))
+
+;;;###autoload
+(defun doom-module-at-point ()
+  "Return the key of the module at point.
+
+The key is in the format (SOURCE GROUP MODULE [FLAG]) and is deduced from the
+arguments of the surrounding `doom!' or `modulep!' call. In `modulep!', all its
+arguments are processed into a module key. In `doom!', it depends on what the
+cursor is on (see demos).
+
+The key is a list of the form (SOURCE GROUP MODULE [FLAGS...])."
+  (with-syntax-table emacs-lisp-mode-syntax-table
+    (save-excursion
+      (save-match-data
+        (let* ((parse-sexp-ignore-comments t)
+               (origin (point))
+               (re (format "(%s\\_>" (regexp-opt '("doom!" "modulep!") t)))
+               (start (cl-find-if (fn! (goto-char %) (looking-at re))
+                                  (reverse (ppss-open-parens (syntax-ppss))))))
+          (pcase (and start (match-string-no-properties 1))
+            ("modulep!"
+             (goto-char start)
+             (when-let* ((args (cdr (ignore-errors (read (current-buffer))))))
+               (if (keywordp (car args))
+                   (cons t args)
+                 ;; Only flags were given, e.g. (modulep! +lsp): the group and
+                 ;; module are implied by the surrounding file.
+                 (when-let* ((mod (doom-module-from-path
+                                   (or buffer-file-name default-directory))))
+                   (append (list t (car mod) (cdr mod)) args)))))
+            ("doom!"
+             (goto-char origin)
+             (forward-line 0)
+             (skip-chars-forward " \t")
+             (let ((commented? (looking-at ";"))
+                   ;; Where this line's code begins, past any comment markers.
+                   (code (progn (skip-chars-forward "; \t") (point))))
+               (setq origin (max origin code))
+               ;; If point is in a trailing comment, snap it back to the code
+               ;; before it.
+               (when (search-forward ";" origin t)
+                 (skip-chars-backward "; \t")
+                 (setq origin (1- (point))))
+               (save-restriction
+                 ;; A commented-out line is parsed in isolation, so unbalanced
+                 ;; junk in it can't affect the rest of the form.
+                 (when commented? (narrow-to-region code (pos-eol)))
+                 (let* ((state (parse-partial-sexp (if commented? code (1+ start)) origin))
+                        ;; The (MODULE FLAGS...) list around point, if any.
+                        ;; `parse-partial-sexp' has left point at ORIGIN.
+                        (entry (car (ppss-open-parens state)))
+                        (sym (symbol-at-point))
+                        (beg (cond (commented? (pos-bol))
+                                   (entry)
+                                   ((car (bounds-of-thing-at-point 'symbol)))
+                                   (origin)))
+                        (module (if entry
+                                    (ignore-errors (goto-char (1+ entry)) (read (current-buffer)))
+                                  (unless (keywordp sym) sym)))
+                        (flag (and entry (not (eq sym module)) sym)))
+                   (widen)
+                   ;; Walk back over sibling sexps and comments to the group
+                   ;; keyword. Comment lines are only inspected, never parsed.
+                   (goto-char beg)
+                   (ignore-errors
+                     (while (not (looking-at "[; \t]*:"))
+                       (unless (forward-comment -1)
+                         (goto-char (scan-sexps (point) -1)))))
+                   (when (looking-at "[; \t]*:")
+                     (skip-chars-forward "; \t")
+                     (append (list t (symbol-at-point))
+                             (delq nil (list module flag))))))))))))))
+
+;; DEPRECATED: Will be replaced in v3.
+(let ((cache (make-hash-table :test 'equal)))
+  (defun doom-module--summary (key)
+    "Return the #+SUBTITLE for a module with KEY."
+    (with-memoization (gethash key cache)
+      (let ((docs "<no summary>")
+            (readme (doom-module-expand-path (cons (cadr key) (caddr key)) "README.org")))
+        (when (and (stringp readme) (file-exists-p readme))
+          (with-temp-buffer
+            (insert-file-contents readme nil 0 512)
+            (save-match-data
+              (when (re-search-forward "^#\\+subtitle: +\\(.+\\)$" nil t)
+                (setq docs (match-string-no-properties 1))))))
+        docs))))
+
+(defun doom-module--annotate (cand)
+  "Generic annotator for `doom-module' completion candidates."
+  (when-let* ((key (doom-module-key<-str cand))
+              (desc (doom-module--summary key)))
+    (let ((state (doom-module-active-p (cadr key) (caddr key))))
+      (concat (propertize " " 'display '(space :align-to 30))
+              (propertize (format "%3s" (if state "on" "off"))
+                          'face (if state 'success 'shadow))
+              "   "
+              (propertize desc 'face 'completions-annotations)))))
+
+;;;###autoload
+(defun doom-module-completing-read (prompt)
+  "Prompts to select a module from the list all available modules.
+
+PROMPT is the message to display when prompting (see `completing-read').
+
+Returns a module key in the (SOURCE GROUP MODULE) format, where SOURCE and
+MODULE are symbols and GROUP is a keyword."
+  (when-let*
+      ((modules (doom-module-list 'all))
+       (choice (completing-read
+                prompt
+                (let ((cands (cl-loop for (grp . mod) in modules
+                                      unless (and (eq grp :user) (null mod))
+                                      collect (if mod
+                                                  (format "%s %s" grp mod)
+                                                (format "%s" grp))))
+                      (sortfn (fn! (sort % #'string-lessp))))
+                  (lambda (str pred action)
+                    (if (eq action 'metadata)
+                        `(metadata
+                          (category . doom-module)
+                          (annotation-function . doom-module--annotate)
+                          (display-sort-function . ,sortfn)
+                          (cycle-sort-function . ,sortfn))
+                      (complete-with-action action cands str pred))))
+                nil t nil nil
+                (when-let* ((key (or (doom-module-at-point)
+                                     (doom-module-from-path (or buffer-file-name default-directory))))
+                            (key (doom-module-key key)))
+                  (format-spec "%g %m"
+                               `((?g . ,(car key))
+                                 (?m . ,(or (cdr key) ""))))))))
+    (doom-module-key<-str choice)))
 
 
 ;;; ** doom-module-context

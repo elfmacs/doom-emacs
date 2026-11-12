@@ -143,7 +143,7 @@
       ;;   command line, and will do so *really* early in the startup process.
       ;;   These might contain special file paths like TRAMP paths, so restore
       ;;   `file-name-handler-alist' just for this portion of startup.
-      (define-advice command-line-1 (:around (fn args-left))
+      (define-advice command-line-1 (:around (fn args-left) restore-file-name-handlers)
         (let ((file-name-handler-alist
                (if args-left (copy-sequence old-value) file-name-handler-alist)))
           (funcall fn args-left)))
@@ -198,8 +198,8 @@
         (define-advice tty-run-terminal-initialization (:override (&rest _) defer)
           (advice-remove #'tty-run-terminal-initialization #'tty-run-terminal-initialization@defer)
           (add-hook 'window-setup-hook
-                    (doom-partial #'tty-run-terminal-initialization
-                                  (selected-frame) nil t))))
+                    (apply-partially #'tty-run-terminal-initialization
+                                     (selected-frame) nil t))))
 
       ;; These optimizations make impede debugging other issues, so bow out when
       ;; debug mode is on.
@@ -217,14 +217,12 @@
         ;; PERF,UX: Premature redisplays/redraws can substantially affect startup
         ;;   times and/or flash a white/unstyled Emacs frame during startup, so I
         ;;   try real hard to suppress them until we're sure the session is ready.
-        (setq-default inhibit-redisplay t
-                      inhibit-message t)
+        (setq-default inhibit-message t)
         ;; COMPAT: If the above vars aren't reset, Emacs could appear frozen or
         ;;   garbled after startup (or in case of an startup error).
         (defun doom--reset-inhibited-vars-h ()
           (remove-hook 'post-command-hook #'doom--reset-inhibited-vars-h)
-          (setq-default inhibit-redisplay nil
-                        inhibit-message nil))
+          (setq-default inhibit-message nil))
         (add-hook 'post-command-hook #'doom--reset-inhibited-vars-h -100))
 
       ;; PERF: Doom disables the UI elements by default, so that there's less for
@@ -253,15 +251,7 @@
       (unless (eq system-type 'darwin)
         (setq command-line-ns-option-alist nil))
       (unless (memq initial-window-system '(x pgtk))
-        (setq command-line-x-option-alist nil))
-
-      ;; PERF: `setopt' can eagerly load symbol dependencies to preform immediate
-      ;;   type checking, which can cause unexpected load order issues and impact
-      ;;   startup time drastically. Type checks are already performed when the
-      ;;   variable is defined, anyway, so this advice prevents early loading.
-      (define-advice setopt--set (:around (fn &rest args) inhibit-load-symbol -90)
-        (let ((custom-load-recursion t))
-          (apply fn args))))))
+        (setq command-line-x-option-alist nil)))))
 
 
 ;; PERF: Many elisp file API calls consult `file-name-handler-alist' (like
